@@ -20,6 +20,15 @@ CLI args → Claude → OpenClaw tool call → Live price (yfinance) + predictio
 - Python 3.8+
 - An [Anthropic API key](https://console.anthropic.com) with available credits
 
+## Dependencies
+
+| Package | Version | Purpose |
+|---------|---------|---------|
+| `anthropic` | 0.96.0 | Claude API SDK and tool use |
+| `yfinance` | 1.3.0 | Live stock price data from Yahoo Finance |
+| `matplotlib` | 3.10.8 | Analysis chart generation |
+| `numpy` | 2.4.4 | Numerical operations for chart rendering |
+
 ## Setup
 
 ```bash
@@ -32,7 +41,7 @@ source .venv/bin/activate  # macOS/Linux
 # .venv\Scripts\activate   # Windows
 
 # Install dependencies
-pip install anthropic yfinance matplotlib
+pip install -r requirements.txt
 
 # Set your API key
 export ANTHROPIC_API_KEY=sk-ant-...
@@ -141,6 +150,7 @@ The **OpenClaw** tool is defined as an Anthropic tool-use schema. Claude calls i
 ```
 stock-prediction/
 ├── stock_predictor.py   # Main application
+├── requirements.txt     # Python dependencies
 ├── README.md            # This file
 ├── results/             # Output from each run (auto-created)
 │   └── YYYYMMDD_HHMMSS/
