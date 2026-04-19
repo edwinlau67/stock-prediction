@@ -69,17 +69,18 @@ python stock_predictor.py --tickers AAPL TSLA NVDA
 ```bash
 python stock_predictor.py --tickers MSFT --timeframe 3m
 python stock_predictor.py --tickers GOOG AMZN --timeframe 1d
+python stock_predictor.py --tickers NVDA --timeframe 6m
 ```
 
 ### All options
 
 ```
 usage: stock_predictor.py [-h] [--tickers TICKER [TICKER ...]]
-                          [--timeframe {1d,1w,1m,3m}]
+                          [--timeframe {1d,1w,1m,3m,6m}]
 
 options:
   --tickers   One or more stock ticker symbols (default: AAPL TSLA INTC)
-  --timeframe Prediction timeframe for all tickers: 1d, 1w, 1m, 3m (default: 1w)
+  --timeframe Prediction timeframe for all tickers: 1d, 1w, 1m, 3m, 6m (default: 1w)
 ```
 
 ### Supported timeframes
@@ -90,6 +91,7 @@ options:
 | `1w`  | 1 week   |
 | `1m`  | 1 month  |
 | `3m`  | 3 months |
+| `6m`  | 6 months |
 
 ## Output
 
@@ -129,7 +131,7 @@ The **OpenClaw** tool is defined as an Anthropic tool-use schema. Claude calls i
 | Parameter   | Type   | Required | Description                                       |
 |-------------|--------|----------|---------------------------------------------------|
 | `ticker`    | string | Yes      | Stock ticker symbol (e.g., `AAPL`, `TSLA`)        |
-| `timeframe` | string | No       | One of `1d`, `1w`, `1m`, `3m` — defaults to `1w`  |
+| `timeframe` | string | No       | One of `1d`, `1w`, `1m`, `3m`, `6m` — defaults to `1w`  |
 
 **Output fields:**
 

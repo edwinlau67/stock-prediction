@@ -35,8 +35,8 @@ tools = [
                 },
                 "timeframe": {
                     "type": "string",
-                    "enum": ["1d", "1w", "1m", "3m"],
-                    "description": "Prediction timeframe: 1 day, 1 week, 1 month, or 3 months",
+                    "enum": ["1d", "1w", "1m", "3m", "6m"],
+                    "description": "Prediction timeframe: 1 day, 1 week, 1 month, 3 months, or 6 months",
                 },
             },
             "required": ["ticker"],
@@ -55,13 +55,23 @@ def get_current_price(ticker: str) -> float:
 
 def get_price_history(ticker: str, timeframe: str) -> tuple[list, list]:
     """Fetch recent historical prices for the sparkline chart."""
-    period_map = {"1d": "5d", "1w": "1mo", "1m": "3mo", "3m": "1y"}
-    interval_map = {"1d": "1h", "1w": "1d", "1m": "1wk", "3m": "1mo"}
+    period_map = {"1d": "5d", "1w": "1mo", "1m": "3mo", "3m": "1y", "6m": "2y"}
+    interval_map = {"1d": "1h", "1w": "1d", "1m": "1wk", "3m": "1mo", "6m": "1mo"}
     hist = yf.Ticker(ticker).history(
         period=period_map.get(timeframe, "1mo"),
         interval=interval_map.get(timeframe, "1d"),
     )
     return list(range(len(hist))), list(hist["Close"])
+
+
+def get_moving_averages(ticker: str) -> tuple[list, list, list]:
+    """Fetch 1 year of daily closes and return (indices, ma50, ma200)."""
+    hist = yf.Ticker(ticker).history(period="1y", interval="1d")
+    closes = hist["Close"]
+    xs = list(range(len(closes)))
+    ma50 = closes.rolling(window=50).mean().tolist()
+    ma200 = closes.rolling(window=200).mean().tolist()
+    return xs, ma50, ma200
 
 
 def run_openclaw(ticker: str, timeframe: str = "1w") -> dict:
@@ -96,7 +106,7 @@ def run_openclaw(ticker: str, timeframe: str = "1w") -> dict:
         ],
     }
 
-    timeframe_days = {"1d": 1, "1w": 7, "1m": 30, "3m": 90}
+    timeframe_days = {"1d": 1, "1w": 7, "1m": 30, "3m": 90, "6m": 180}
     target_date = (datetime.now() + timedelta(days=timeframe_days.get(timeframe, 7))).strftime("%Y-%m-%d")
 
     return {
@@ -134,12 +144,12 @@ def generate_chart(prediction: dict, charts_dir: str) -> str:
     )
     gs = gridspec.GridSpec(2, 2, figure=fig, hspace=0.45, wspace=0.35)
 
-    # ── Panel 1: Price history sparkline + target projection ──────────────
+    # ── Panel 1: Price history sparkline + target projection + MAs ───────
     ax1 = fig.add_subplot(gs[0, 0])
     ax1.set_facecolor("#161b22")
     try:
         xs, prices = get_price_history(ticker, timeframe)
-        ax1.plot(xs, prices, color=main_color, linewidth=2)
+        ax1.plot(xs, prices, color=main_color, linewidth=2, label="Price")
         ax1.fill_between(xs, prices, alpha=0.15, color=main_color)
         last_x = xs[-1]
         proj_x = [last_x, last_x + max(1, len(xs) // 4)]
@@ -152,10 +162,29 @@ def generate_chart(prediction: dict, charts_dir: str) -> str:
             f"  ${target:,.2f}",
             color=main_color, fontsize=8, va="center",
         )
+
+        # Overlay 50-day and 200-day moving averages scaled to chart x-range
+        try:
+            ma_xs, ma50, ma200 = get_moving_averages(ticker)
+            n = len(xs)
+            # Scale MA indices to the same x-range as the sparkline
+            scaled_xs = [i * (last_x / max(len(ma_xs) - 1, 1)) for i in ma_xs]
+            valid50 = [(scaled_xs[i], ma50[i]) for i in range(len(ma50)) if ma50[i] is not None and not np.isnan(ma50[i])]
+            valid200 = [(scaled_xs[i], ma200[i]) for i in range(len(ma200)) if ma200[i] is not None and not np.isnan(ma200[i])]
+            if valid50:
+                ax1.plot([p[0] for p in valid50], [p[1] for p in valid50],
+                         color="#f0b429", linewidth=1.2, alpha=0.85, label="MA50")
+            if valid200:
+                ax1.plot([p[0] for p in valid200], [p[1] for p in valid200],
+                         color="#a78bfa", linewidth=1.2, alpha=0.85, label="MA200")
+            ax1.legend(fontsize=6, loc="upper left", facecolor="#161b22",
+                       edgecolor="#30363d", labelcolor="white", framealpha=0.8)
+        except Exception:
+            pass
     except Exception:
         ax1.text(0.5, 0.5, "History unavailable", ha="center", va="center",
                  color="gray", transform=ax1.transAxes)
-    ax1.set_title("Price History + Target", color="white", fontsize=10, pad=6)
+    ax1.set_title("Price History + MA50/200 + Target", color="white", fontsize=10, pad=6)
     ax1.tick_params(colors="gray", labelsize=7)
     for spine in ax1.spines.values():
         spine.set_edgecolor("#30363d")
@@ -341,7 +370,7 @@ if __name__ == "__main__":
         help="one or more stock ticker symbols (default: AAPL TSLA INTC)",
     )
     parser.add_argument(
-        "--timeframe", choices=["1d", "1w", "1m", "3m"], default=None,
+        "--timeframe", choices=["1d", "1w", "1m", "3m", "6m"], default=None,
         help="prediction timeframe for all tickers (default: 1w)",
     )
     args = parser.parse_args()
