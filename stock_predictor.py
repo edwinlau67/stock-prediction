@@ -284,8 +284,8 @@ def generate_chart(prediction: dict, charts_dir: str) -> str:
     return chart_path
 
 
-def predict_stock(ticker: str, timeframe: str = "1w", md_file=None, charts_dir: str = "charts") -> None:
-    print(f"\nAnalyzing {ticker.upper()} for {timeframe} timeframe...\n")
+def predict_stock(ticker: str, timeframe: str = "1w", md_file=None, charts_dir: str = "charts", model: str = "claude-sonnet-4-6") -> None:
+    print(f"\nAnalyzing {ticker.upper()} for {timeframe} timeframe... (model: {model})\n")
 
     messages = [
         {
@@ -295,7 +295,7 @@ def predict_stock(ticker: str, timeframe: str = "1w", md_file=None, charts_dir: 
     ]
 
     response = client.messages.create(
-        model="claude-sonnet-4-6",
+        model=model,
         max_tokens=1024,
         system=[{"type": "text", "text": SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}],
         tools=tools,
@@ -326,7 +326,7 @@ def predict_stock(ticker: str, timeframe: str = "1w", md_file=None, charts_dir: 
         messages.append({"role": "user", "content": tool_results})
 
         response = client.messages.create(
-            model="claude-sonnet-4-6",
+            model=model,
             max_tokens=1024,
             system=[{"type": "text", "text": SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}],
             tools=tools,
@@ -362,6 +362,7 @@ if __name__ == "__main__":
             "  python stock_predictor.py --tickers AAPL TSLA NVDA\n"
             "  python stock_predictor.py --tickers MSFT --timeframe 3m\n"
             "  python stock_predictor.py --tickers GOOG AMZN --timeframe 1d\n"
+            "  python stock_predictor.py --tickers AAPL --model claude-opus-4-7\n"
         ),
     )
     parser.add_argument(
@@ -372,6 +373,11 @@ if __name__ == "__main__":
     parser.add_argument(
         "--timeframe", choices=["1d", "1w", "1m", "3m", "6m"], default=None,
         help="prediction timeframe for all tickers (default: 1w)",
+    )
+    parser.add_argument(
+        "--model", default="claude-sonnet-4-6",
+        metavar="MODEL",
+        help="Claude model ID to use (default: claude-sonnet-4-6)",
     )
     args = parser.parse_args()
 
@@ -386,12 +392,12 @@ if __name__ == "__main__":
         f.write(f"**Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
         tickers_str = ", ".join(t.upper() for t in args.tickers)
         tf_str = args.timeframe or "per-ticker default"
-        f.write(f"**Tickers:** {tickers_str}  \n**Timeframe:** {tf_str}\n\n")
+        f.write(f"**Tickers:** {tickers_str}  \n**Timeframe:** {tf_str}  \n**Model:** {args.model}\n\n")
         f.write("---\n\n")
 
         default_timeframes = {"AAPL": "1w", "TSLA": "1m", "INTC": "1m"}
         for ticker in args.tickers:
             tf = args.timeframe or default_timeframes.get(ticker.upper(), "1w")
-            predict_stock(ticker, tf, md_file=f, charts_dir=charts_dir)
+            predict_stock(ticker, tf, md_file=f, charts_dir=charts_dir, model=args.model)
 
     print(f"\nResults saved to: {run_dir}/")

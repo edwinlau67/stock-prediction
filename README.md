@@ -70,6 +70,7 @@ python stock_predictor.py --tickers AAPL TSLA NVDA
 python stock_predictor.py --tickers MSFT --timeframe 3m
 python stock_predictor.py --tickers GOOG AMZN --timeframe 1d
 python stock_predictor.py --tickers NVDA --timeframe 6m
+python stock_predictor.py --tickers AAPL --model claude-opus-4-7
 ```
 
 ### All options
@@ -77,10 +78,12 @@ python stock_predictor.py --tickers NVDA --timeframe 6m
 ```
 usage: stock_predictor.py [-h] [--tickers TICKER [TICKER ...]]
                           [--timeframe {1d,1w,1m,3m,6m}]
+                          [--model MODEL]
 
 options:
   --tickers   One or more stock ticker symbols (default: AAPL TSLA INTC)
   --timeframe Prediction timeframe for all tickers: 1d, 1w, 1m, 3m, 6m (default: 1w)
+  --model     Claude model ID to use (default: claude-sonnet-4-6)
 ```
 
 ### Supported timeframes
@@ -92,6 +95,14 @@ options:
 | `1m`  | 1 month  |
 | `3m`  | 3 months |
 | `6m`  | 6 months |
+
+### Supported models
+
+| Model ID | Notes |
+|----------|-------|
+| `claude-sonnet-4-6` | Default — fast and cost-effective |
+| `claude-opus-4-7` | Most capable, higher cost |
+| `claude-haiku-4-5-20251001` | Fastest and cheapest |
 
 ## Output
 
@@ -109,7 +120,7 @@ results/
 
 ### Markdown report
 
-The `predictions.md` file contains a full analysis per ticker including a summary table, key factors, and AI narrative — with each chart embedded inline.
+The `predictions.md` file contains a full analysis per ticker including a summary table, key factors, and AI narrative — with each chart embedded inline. The report header records the tickers, timeframe, and model used.
 
 ### Analysis charts
 
@@ -117,7 +128,7 @@ Each PNG chart contains 4 panels:
 
 | Panel | Description |
 |-------|-------------|
-| **Price History + Target** | Historical price sparkline with projected target line |
+| **Price History + MA50/200 + Target** | Historical price sparkline with 50-day (amber) and 200-day (purple) moving averages and projected target line |
 | **Price Target** | Current vs target price bar chart with % change |
 | **Confidence & Risk** | Arc gauge showing confidence %, risk pill, and direction label |
 | **Key Factors (Impact)** | Horizontal bar chart of the factors driving the prediction |
