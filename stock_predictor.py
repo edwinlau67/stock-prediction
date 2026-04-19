@@ -13,14 +13,14 @@ import yfinance as yf
 
 client = anthropic.Anthropic()
 
-SYSTEM_PROMPT = """You are a financial analysis assistant with access to the OpenClaw
-stock prediction tool. When asked about a stock, use the OpenClaw tool to retrieve
+SYSTEM_PROMPT = """You are a financial analysis assistant with access to the stock prediction tool.
+When asked about a stock, use the stock_prediction tool to retrieve
 prediction data, then provide a clear, concise analysis of the results. Always remind
 users that stock predictions are not financial advice."""
 
 tools = [
     {
-        "name": "OpenClaw",
+        "name": "stock_prediction",
         "description": (
             "Predicts the future price movement of a stock based on technical analysis, "
             "sentiment data, and historical patterns. Returns a prediction with confidence "
@@ -139,7 +139,7 @@ def generate_chart(prediction: dict, charts_dir: str) -> str:
 
     fig = plt.figure(figsize=(12, 8), facecolor="#0d1117")
     fig.suptitle(
-        f"{ticker} — OpenClaw Analysis ({timeframe})",
+        f"{ticker} — Stock Analysis ({timeframe})",
         fontsize=16, fontweight="bold", color="white", y=0.98,
     )
     gs = gridspec.GridSpec(2, 2, figure=fig, hspace=0.45, wspace=0.35)
@@ -290,7 +290,7 @@ def predict_stock(ticker: str, timeframe: str = "1w", md_file=None, charts_dir: 
     messages = [
         {
             "role": "user",
-            "content": f"Use OpenClaw to predict the stock performance of {ticker} over the next {timeframe}.",
+            "content": f"Use the stock_prediction tool to predict the stock performance of {ticker} over the next {timeframe}.",
         }
     ]
 
@@ -309,10 +309,10 @@ def predict_stock(ticker: str, timeframe: str = "1w", md_file=None, charts_dir: 
     while response.stop_reason == "tool_use":
         tool_results = []
         for block in response.content:
-            if block.type == "tool_use" and block.name == "OpenClaw":
+            if block.type == "tool_use" and block.name == "stock_prediction":
                 ticker_input = block.input.get("ticker", ticker)
                 tf_input = block.input.get("timeframe", timeframe)
-                print(f"OpenClaw called: ticker={ticker_input}, timeframe={tf_input}")
+                print(f"Tool called: ticker={ticker_input}, timeframe={tf_input}")
                 prediction = run_openclaw(ticker_input, tf_input)
                 last_prediction = prediction
                 print(f"Prediction data: {json.dumps(prediction, indent=2)}\n")
@@ -353,7 +353,7 @@ def predict_stock(ticker: str, timeframe: str = "1w", md_file=None, charts_dir: 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="OpenClaw Stock Predictor — AI-powered stock analysis",
+        description="Stock Predictor — AI-powered stock analysis",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "examples:\n"
@@ -388,7 +388,7 @@ if __name__ == "__main__":
 
     md_filename = os.path.join(run_dir, "predictions.md")
     with open(md_filename, "w") as f:
-        f.write("# OpenClaw Stock Predictions\n\n")
+        f.write("# Stock Predictions\n\n")
         f.write(f"**Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
         tickers_str = ", ".join(t.upper() for t in args.tickers)
         tf_str = args.timeframe or "per-ticker default"

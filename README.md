@@ -1,16 +1,16 @@
-# OpenClaw Stock Predictor
+# Stock Predictor
 
-A Python application that uses the [Anthropic SDK](https://github.com/anthropics/anthropic-sdk-python) and Claude's tool use feature to predict stock performance. Claude calls the **OpenClaw** tool to retrieve real-time price data and generate predictions, then delivers a structured analysis with price targets, confidence scores, and key market factors — saved as a Markdown report with analysis charts.
+A Python application that uses the [Anthropic SDK](https://github.com/anthropics/anthropic-sdk-python) and Claude's tool use feature to predict stock performance. Claude calls the **Stock Prediction** tool to retrieve real-time price data and generate predictions, then delivers a structured analysis with price targets, confidence scores, and key market factors — saved as a Markdown report with analysis charts.
 
 ## How It Works
 
 ```
-CLI args → Claude → OpenClaw tool call → Live price (yfinance) + prediction data → Claude analysis → Markdown report + charts
+CLI args → Claude → Stock Prediction tool call → Live price (yfinance) + prediction data → Claude analysis → Markdown report + charts
 ```
 
 1. You specify one or more tickers and a timeframe via CLI arguments
-2. Claude invokes the **OpenClaw** tool with the ticker and timeframe
-3. OpenClaw fetches the **real current price** from Yahoo Finance and generates prediction data
+2. Claude invokes the **Stock Prediction** tool with the ticker and timeframe
+3. Stock Prediction fetches the **real current price** from Yahoo Finance and generates prediction data
 4. Claude analyzes the data and writes a formatted Markdown report
 5. A 4-panel analysis chart (PNG) is generated per ticker
 6. All output is saved into a timestamped folder under `results/`
@@ -133,9 +133,9 @@ Each PNG chart contains 4 panels:
 | **Confidence & Risk** | Arc gauge showing confidence %, risk pill, and direction label |
 | **Key Factors (Impact)** | Horizontal bar chart of the factors driving the prediction |
 
-## OpenClaw Tool Reference
+## Stock Prediction Tool Reference
 
-The **OpenClaw** tool is defined as an Anthropic tool-use schema. Claude calls it automatically when asked for a stock prediction.
+The **Stock Prediction** tool is defined as an Anthropic tool-use schema. Claude calls it automatically when asked for a stock prediction.
 
 **Input parameters:**
 
@@ -184,4 +184,4 @@ Cache read: 312 tokens
 
 ## Disclaimer
 
-OpenClaw predictions are **simulated** and for demonstration purposes only. While current prices are fetched live from Yahoo Finance, the prediction direction, confidence, and key factors are algorithmically generated and do not reflect real financial analysis. This tool should not be used to make investment decisions.
+Predictions are **simulated** and for demonstration purposes only. While current prices are fetched live from Yahoo Finance, the prediction direction, confidence, and key factors are algorithmically generated and do not reflect real financial analysis. This tool should not be used to make investment decisions.
