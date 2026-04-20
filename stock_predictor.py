@@ -35,8 +35,8 @@ tools = [
                 },
                 "timeframe": {
                     "type": "string",
-                    "enum": ["1d", "1w", "1m", "3m", "6m"],
-                    "description": "Prediction timeframe: 1 day, 1 week, 1 month, 3 months, or 6 months",
+                    "enum": ["1d", "1w", "1m", "3m", "6m", "ytd", "1y", "2y", "5y"],
+                    "description": "Prediction timeframe: 1d, 1w, 1m, 3m, 6m, ytd, 1y, 2y, or 5y",
                 },
             },
             "required": ["ticker"],
@@ -59,6 +59,44 @@ def _valid(v) -> bool:
         return v is not None and not np.isnan(v)
     except (TypeError, ValueError):
         return False
+
+
+def get_fundamental_indicators(ticker: str) -> dict:
+    """Fetch key fundamental metrics from Yahoo Finance."""
+    info = yf.Ticker(ticker).info
+
+    def _get(key):
+        v = info.get(key)
+        if v is None or v == "N/A":
+            return None
+        try:
+            f = float(v)
+            return None if (np.isnan(f) or np.isinf(f)) else f
+        except (TypeError, ValueError):
+            return None
+
+    return {
+        "trailing_pe":      _get("trailingPE"),
+        "forward_pe":       _get("forwardPE"),
+        "price_to_book":    _get("priceToBook"),
+        "price_to_sales":   _get("priceToSalesTrailing12Months"),
+        "ev_ebitda":        _get("enterpriseToEbitda"),
+        "peg_ratio":        _get("pegRatio"),
+        "trailing_eps":     _get("trailingEps"),
+        "forward_eps":      _get("forwardEps"),
+        "earnings_growth":  _get("earningsGrowth"),   # decimal, e.g. 0.15
+        "revenue_growth":   _get("revenueGrowth"),    # decimal
+        "gross_margin":     _get("grossMargins"),      # decimal
+        "operating_margin": _get("operatingMargins"),  # decimal
+        "net_margin":       _get("profitMargins"),     # decimal
+        "roe":              _get("returnOnEquity"),    # decimal
+        "roa":              _get("returnOnAssets"),    # decimal
+        "debt_to_equity":   _get("debtToEquity"),     # yfinance: percentage * 100
+        "current_ratio":    _get("currentRatio"),
+        "dividend_yield":   _get("dividendYield"),    # decimal
+        "market_cap":       _get("marketCap"),
+        "short_ratio":      _get("shortRatio"),
+    }
 
 
 def get_technical_indicators(ticker: str) -> dict:
@@ -297,7 +335,7 @@ def get_technical_indicators(ticker: str) -> dict:
 
 def run_prediction(ticker: str, timeframe: str = "1w", indicators: set | None = None) -> dict:
     if indicators is None:
-        indicators = {"trend", "momentum", "volatility", "volume", "support"}
+        indicators = {"trend", "momentum", "volatility", "volume", "support", "fundamental"}
 
     base_price = get_current_price(ticker)
 
@@ -305,6 +343,11 @@ def run_prediction(ticker: str, timeframe: str = "1w", indicators: set | None = 
         tech = get_technical_indicators(ticker)
     except Exception:
         tech = None
+
+    try:
+        fund = get_fundamental_indicators(ticker) if "fundamental" in indicators else None
+    except Exception:
+        fund = None
 
     bullish_score = 0
     bearish_score = 0
@@ -442,6 +485,64 @@ def run_prediction(ticker: str, timeframe: str = "1w", indicators: set | None = 
                 bullish_score += 1
                 key_factors.append(f"Price below lower BB (${last_bb_lower:.2f}) — oversold")
 
+    if fund and "fundamental" in indicators:
+        pe = fund.get("trailing_pe")
+        if pe is not None:
+            if pe < 15:
+                bullish_score += 1
+                key_factors.append(f"P/E attractive ({pe:.1f}x) — potentially undervalued")
+            elif pe > 35:
+                bearish_score += 1
+                key_factors.append(f"P/E elevated ({pe:.1f}x) — potentially overvalued")
+
+        rev_growth = fund.get("revenue_growth")
+        if rev_growth is not None:
+            if rev_growth > 0.10:
+                bullish_score += 1
+                key_factors.append(f"Revenue growth strong ({rev_growth*100:+.1f}% YoY)")
+            elif rev_growth < 0:
+                bearish_score += 1
+                key_factors.append(f"Revenue declining ({rev_growth*100:+.1f}% YoY)")
+
+        earn_growth = fund.get("earnings_growth")
+        if earn_growth is not None:
+            if earn_growth > 0.15:
+                bullish_score += 1
+                key_factors.append(f"Earnings growth strong ({earn_growth*100:+.1f}% YoY)")
+            elif earn_growth < 0:
+                bearish_score += 1
+                key_factors.append(f"Earnings declining ({earn_growth*100:+.1f}% YoY)")
+
+        net_margin = fund.get("net_margin")
+        if net_margin is not None and net_margin > 0.15:
+            bullish_score += 1
+            key_factors.append(f"Strong net margin ({net_margin*100:.1f}%)")
+
+        roe = fund.get("roe")
+        if roe is not None:
+            if roe > 0.15:
+                bullish_score += 1
+                key_factors.append(f"Strong ROE ({roe*100:.1f}%)")
+            elif roe < 0:
+                bearish_score += 1
+                key_factors.append(f"Negative ROE ({roe*100:.1f}%) — unprofitable")
+
+        de = fund.get("debt_to_equity")
+        if de is not None:
+            de_ratio = de / 100
+            if de_ratio < 0.5:
+                bullish_score += 1
+                key_factors.append(f"Low debt-to-equity ({de_ratio:.2f}x) — financially healthy")
+            elif de_ratio > 2.0:
+                bearish_score += 1
+                key_factors.append(f"High debt-to-equity ({de_ratio:.2f}x) — heavily leveraged")
+
+        current_ratio = fund.get("current_ratio")
+        if current_ratio is not None:
+            if current_ratio < 1.0:
+                bearish_score += 1
+                key_factors.append(f"Current ratio weak ({current_ratio:.2f}) — liquidity risk")
+
     if bullish_score > bearish_score:
         direction = "bullish"
     elif bearish_score > bullish_score:
@@ -471,7 +572,8 @@ def run_prediction(ticker: str, timeframe: str = "1w", indicators: set | None = 
                 f"{'high' if ratio > 1.3 else 'low' if ratio < 0.8 else 'moderate'} volatility"
             )
 
-    timeframe_days = {"1d": 1, "1w": 7, "1m": 30, "3m": 90, "6m": 180}
+    _ytd_days = (datetime.now() - datetime(datetime.now().year, 1, 1)).days or 1
+    timeframe_days = {"1d": 1, "1w": 7, "1m": 30, "3m": 90, "6m": 180, "ytd": _ytd_days, "1y": 365, "2y": 730, "5y": 1825}
     target_date = (datetime.now() + timedelta(days=timeframe_days.get(timeframe, 7))).strftime("%Y-%m-%d")
 
     return {
@@ -485,6 +587,7 @@ def run_prediction(ticker: str, timeframe: str = "1w", indicators: set | None = 
         "key_factors": key_factors[:6],
         "risk_level": risk_level,
         "technical": tech,
+        "fundamental": fund,
         "indicators": sorted(indicators),
     }
 
@@ -500,7 +603,8 @@ def generate_chart(prediction: dict, charts_dir: str) -> str:
     risk = prediction["risk_level"]
     timeframe = prediction["timeframe"]
     tech = prediction.get("technical") or {}
-    active = set(prediction.get("indicators", ["trend", "momentum", "volatility", "volume", "support"]))
+    fund = prediction.get("fundamental") or {}
+    active = set(prediction.get("indicators", ["trend", "momentum", "volatility", "volume", "support", "fundamental"]))
 
     color_map = {"bullish": "#26a69a", "bearish": "#ef5350", "neutral": "#ffa726"}
     risk_colors = {"low": "#26a69a", "medium": "#ffa726", "high": "#ef5350"}
@@ -508,11 +612,12 @@ def generate_chart(prediction: dict, charts_dir: str) -> str:
 
     # Build rows dynamically from selected indicators (in display order)
     _PANEL_ORDER = [
-        ("trend",      "full",  1.2),
-        ("momentum",   "split", 1.2),
-        ("volume",     "split", 1.2),
-        ("support",    "full",  1.2),
-        ("volatility", "full",  2.0),
+        ("trend",       "full",  1.2),
+        ("momentum",    "split", 1.2),
+        ("volume",      "split", 1.2),
+        ("support",     "full",  1.2),
+        ("volatility",  "full",  2.0),
+        ("fundamental", "full",  2.0),
     ]
     optional = [(cat, layout, h) for cat, layout, h in _PANEL_ORDER if cat in active]
     height_ratios = [2.5] + [h for _, _, h in optional] + [1.2]
@@ -965,6 +1070,75 @@ def generate_chart(prediction: dict, charts_dir: str) -> str:
             for spine in ax8_atr.spines.values():
                 spine.set_edgecolor("#30363d")
 
+        elif _cat == "fundamental":
+            # ── Fundamental Indicators ──────────────────────────────────────
+            ax_f = fig.add_subplot(gs[row, :])
+            ax_f.set_facecolor("#161b22")
+            ax_f.axis("off")
+            ax_f.set_xlim(0, 1)
+            ax_f.set_ylim(0, 1)
+
+            sig_colors = {"bull": "#26a69a", "bear": "#ef5350", "neutral": "#ffa726", "none": "#444444"}
+
+            def _fsig(val, bull_thresh, bear_thresh, higher_is_bull=True):
+                if val is None:
+                    return "none"
+                if higher_is_bull:
+                    return "bull" if val >= bull_thresh else ("bear" if val <= bear_thresh else "neutral")
+                return "bull" if val <= bull_thresh else ("bear" if val >= bear_thresh else "neutral")
+
+            de_ratio = (fund.get("debt_to_equity") or 0) / 100
+
+            metrics = [
+                ("P/E (TTM)",    fund.get("trailing_pe"),      lambda v: _fsig(v, 99, 15, False),    lambda v: f"{v:.1f}×"),
+                ("Fwd P/E",      fund.get("forward_pe"),       lambda v: _fsig(v, 99, 15, False),    lambda v: f"{v:.1f}×"),
+                ("P/B",          fund.get("price_to_book"),    lambda v: _fsig(v, 99, 2, False),     lambda v: f"{v:.1f}×"),
+                ("P/S",          fund.get("price_to_sales"),   lambda v: _fsig(v, 99, 3, False),     lambda v: f"{v:.1f}×"),
+                ("EV/EBITDA",    fund.get("ev_ebitda"),        lambda v: _fsig(v, 99, 10, False),    lambda v: f"{v:.1f}×"),
+                ("PEG",          fund.get("peg_ratio"),        lambda v: _fsig(v, 99, 1, False),     lambda v: f"{v:.2f}"),
+                ("Rev Growth",   fund.get("revenue_growth"),   lambda v: _fsig(v, 0.10, -0.01),      lambda v: f"{v*100:+.1f}%"),
+                ("EPS Growth",   fund.get("earnings_growth"),  lambda v: _fsig(v, 0.15, -0.01),      lambda v: f"{v*100:+.1f}%"),
+                ("Net Margin",   fund.get("net_margin"),       lambda v: _fsig(v, 0.15, 0.05),       lambda v: f"{v*100:.1f}%"),
+                ("Op Margin",    fund.get("operating_margin"), lambda v: _fsig(v, 0.15, 0.05),       lambda v: f"{v*100:.1f}%"),
+                ("ROE",          fund.get("roe"),              lambda v: _fsig(v, 0.15, 0),           lambda v: f"{v*100:.1f}%"),
+                ("D/E",          de_ratio if fund.get("debt_to_equity") else None,
+                                                               lambda v: _fsig(v, 99, 0.5, False),   lambda v: f"{v:.2f}×"),
+                ("Curr Ratio",   fund.get("current_ratio"),   lambda v: _fsig(v, 2.0, 1.0),          lambda v: f"{v:.2f}"),
+                ("Div Yield",    fund.get("dividend_yield"),  lambda v: _fsig(v, 0.03, 0),           lambda v: f"{v*100:.1f}%"),
+                ("Short Ratio",  fund.get("short_ratio"),     lambda v: _fsig(v, 99, 2.0, False),    lambda v: f"{v:.1f}d"),
+            ]
+
+            n_cols = 5
+            col_w = 1.0 / n_cols
+            box_h = 0.38
+            row_gap = 0.46
+            top = 0.92
+
+            for idx, (label, val, sig_fn, fmt_fn) in enumerate(metrics):
+                c = idx % n_cols
+                r = idx // n_cols
+                x0 = c * col_w + 0.005
+                y0 = top - r * row_gap
+
+                sig = sig_fn(val) if val is not None else "none"
+                color = sig_colors[sig]
+                display = fmt_fn(val) if val is not None else "N/A"
+
+                ax_f.add_patch(mpatches.FancyBboxPatch(
+                    (x0, y0 - box_h), col_w - 0.01, box_h,
+                    boxstyle="round,pad=0.01", facecolor=color, edgecolor="none",
+                    alpha=0.15, transform=ax_f.transAxes,
+                ))
+                ax_f.text(x0 + (col_w - 0.01) / 2, y0 - 0.10, label,
+                          ha="center", va="center", color="#aaaaaa", fontsize=7,
+                          transform=ax_f.transAxes)
+                ax_f.text(x0 + (col_w - 0.01) / 2, y0 - 0.27, display,
+                          ha="center", va="center",
+                          color=color if val is not None else "#555555",
+                          fontsize=9, fontweight="bold", transform=ax_f.transAxes)
+
+            ax_f.set_title("Fundamental Indicators", color="white", fontsize=10, pad=6)
+
         row += 1
 
     # ── Confidence + Risk gauge ────────────────────────────────────────────
@@ -1101,7 +1275,7 @@ def predict_stock(ticker: str, timeframe: str = "1w", md_file=None, charts_dir: 
 
 
 if __name__ == "__main__":
-    _all_indicators = ["trend", "momentum", "volatility", "volume", "support"]
+    _all_indicators = ["trend", "momentum", "volatility", "volume", "support", "fundamental"]
 
     parser = argparse.ArgumentParser(
         description="Stock Predictor — AI-powered stock analysis",
@@ -1116,6 +1290,7 @@ if __name__ == "__main__":
             "  python stock_predictor.py --tickers AAPL --model claude-opus-4-7\n"
             "  python stock_predictor.py --tickers AAPL --indicators trend momentum\n"
             "  python stock_predictor.py --tickers TSLA --indicators volatility volume\n"
+            "  python stock_predictor.py --tickers MSFT --indicators fundamental\n"
         ),
     )
     parser.add_argument(
@@ -1124,7 +1299,7 @@ if __name__ == "__main__":
         help="one or more stock ticker symbols (default: AAPL TSLA INTC)",
     )
     parser.add_argument(
-        "--timeframe", choices=["1d", "1w", "1m", "3m", "6m"], default=None,
+        "--timeframe", choices=["1d", "1w", "1m", "3m", "6m", "ytd", "1y", "2y", "5y"], default=None,
         help="prediction timeframe for all tickers (default: 1w)",
     )
     parser.add_argument(
@@ -1138,8 +1313,8 @@ if __name__ == "__main__":
         default=None,
         metavar="INDICATOR",
         help=(
-            "indicator categories to include: trend momentum volatility volume support "
-            "(default: all). Example: --indicators trend momentum"
+            "indicator categories to include: trend momentum volatility volume support fundamental "
+            "(default: all). Example: --indicators trend momentum fundamental"
         ),
     )
     args = parser.parse_args()

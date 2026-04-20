@@ -85,6 +85,9 @@ python stock_predictor.py --tickers AAPL --indicators trend momentum
 # Volatility and volume only
 python stock_predictor.py --tickers TSLA --indicators volatility volume
 
+# Fundamentals only
+python stock_predictor.py --tickers MSFT --indicators fundamental
+
 # Single category
 python stock_predictor.py --tickers NVDA --indicators support
 ```
@@ -101,19 +104,23 @@ options:
   --tickers     One or more stock ticker symbols (default: AAPL TSLA INTC)
   --timeframe   Prediction timeframe for all tickers: 1d, 1w, 1m, 3m, 6m (default: 1w)
   --model       Claude model ID to use (default: claude-sonnet-4-6)
-  --indicators  Indicator categories to include (default: all five)
-                Choices: trend  momentum  volatility  volume  support
+  --indicators  Indicator categories to include (default: all six)
+                Choices: trend  momentum  volatility  volume  support  fundamental
 ```
 
 ### Supported timeframes
 
-| Value | Meaning  |
-|-------|----------|
-| `1d`  | 1 day    |
-| `1w`  | 1 week   |
-| `1m`  | 1 month  |
-| `3m`  | 3 months |
-| `6m`  | 6 months |
+| Value | Meaning             |
+|-------|---------------------|
+| `1d`  | 1 day               |
+| `1w`  | 1 week              |
+| `1m`  | 1 month             |
+| `3m`  | 3 months            |
+| `6m`  | 6 months            |
+| `ytd` | Year to date        |
+| `1y`  | 1 year              |
+| `2y`  | 2 years             |
+| `5y`  | 5 years             |
 
 ### Supported models
 
@@ -162,6 +169,7 @@ Optional panels — included only when the matching `--indicators` category is s
 | **OBV (On-Balance Volume)** | `volume` | Cumulative OBV line coloured by trend (green=rising, red=falling) with fill; trend label in title |
 | **Support & Resistance** | `support` | Last 60 days of price with Fibonacci retracement levels (0%–100%), Pivot Points (PP/R1/R2/S1/S2), and trendlines — all labelled with price values |
 | **ATR (14)** | `volatility` | ATR line coloured by volatility level, 20-day ATR mean (dashed), fill shaded red above mean / green below; current value and ratio in title |
+| **Fundamental Indicators** | `fundamental` | Grid of 15 key metrics (valuation, growth, margins, debt, liquidity) — each cell colour-coded green/amber/red by signal strength |
 
 ## Technical Indicators
 
@@ -200,6 +208,26 @@ All indicators are computed on 1 year of daily closes from Yahoo Finance. They a
 |-----------|--------|
 | **OBV** | Rising OBV = bullish (+1 pt), falling OBV = bearish (+1 pt) |
 | **Volume Spike** | Spike on up day = bullish (+1 pt), spike on down day = bearish (+1 pt); spike = volume > 20-day mean + 2σ |
+
+### `fundamental`
+
+| Indicator | Detail |
+|-----------|--------|
+| **P/E (TTM)** | Trailing P/E; < 15 = bullish (+1 pt), > 35 = bearish (+1 pt) |
+| **Forward P/E** | Forward P/E consensus estimate |
+| **P/B** | Price-to-book; < 2 = attractive |
+| **P/S** | Price-to-sales (trailing 12 months) |
+| **EV/EBITDA** | Enterprise value to EBITDA |
+| **PEG Ratio** | P/E relative to earnings growth; < 1 = undervalued |
+| **Revenue Growth** | Year-over-year revenue growth; > 10% = bullish (+1 pt), < 0% = bearish (+1 pt) |
+| **EPS Growth** | Year-over-year earnings growth; > 15% = bullish (+1 pt), < 0% = bearish (+1 pt) |
+| **Net Margin** | Net profit margin; > 15% = bullish (+1 pt) |
+| **Operating Margin** | Operating profit margin |
+| **ROE** | Return on equity; > 15% = bullish (+1 pt), < 0% = bearish (+1 pt) |
+| **Debt/Equity** | D/E ratio; < 0.5× = bullish (+1 pt), > 2× = bearish (+1 pt) |
+| **Current Ratio** | Liquidity ratio; < 1.0 = bearish (+1 pt) |
+| **Dividend Yield** | Annual dividend as % of price |
+| **Short Ratio** | Days to cover short interest |
 
 ### `support`
 
