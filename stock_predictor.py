@@ -131,6 +131,45 @@ def get_technical_indicators(ticker: str) -> dict:
         elif sk[i-1] > sd[i-1] and sk[i] <= sd[i]:
             stoch_crossover = "bearish"
 
+    # ── Volatility indicators ─────────────────────────────────────────────
+    # Bollinger Bands (SMA20 ± 2 standard deviations)
+    bb_mid   = closes.rolling(window=20).mean()
+    bb_std   = closes.rolling(window=20).std()
+    bb_upper = bb_mid + 2 * bb_std
+    bb_lower = bb_mid - 2 * bb_std
+
+    last_close = closes.iloc[-1]
+    last_upper = bb_upper.iloc[-1]
+    last_lower = bb_lower.iloc[-1]
+    if _valid(last_upper) and _valid(last_lower):
+        if last_close > last_upper:
+            bb_signal = "above_upper"
+        elif last_close < last_lower:
+            bb_signal = "below_lower"
+        else:
+            bb_signal = "within"
+    else:
+        bb_signal = None
+
+    # ATR (14-period, Wilder's smoothing via EWM)
+    prev_close = closes.shift(1)
+    hl  = highs - lows
+    hpc = (highs - prev_close).abs()
+    lpc = (lows  - prev_close).abs()
+    tr  = hl.where(hl >= hpc, hpc).where(hl.where(hl >= hpc, hpc) >= lpc, lpc)
+    atr = tr.ewm(span=14, adjust=False).mean()
+    atr_mean = atr.rolling(window=20).mean()
+
+    atr_vals = atr.tolist()
+    atr_mean_vals = atr_mean.tolist()
+    last_atr  = next((v for v in reversed(atr_vals) if _valid(v)), None)
+    last_atrm = next((v for v in reversed(atr_mean_vals) if _valid(v)), None)
+    if last_atr and last_atrm and last_atrm > 0:
+        atr_ratio = last_atr / last_atrm
+        atr_level = "high" if atr_ratio > 1.3 else ("low" if atr_ratio < 0.8 else "medium")
+    else:
+        atr_ratio, atr_level = 1.0, "medium"
+
     # ── Volume indicators ─────────────────────────────────────────────────
     # OBV: add volume on up days, subtract on down days
     obv = (np.sign(closes.diff()) * volume).fillna(0).cumsum()
@@ -176,6 +215,14 @@ def get_technical_indicators(ticker: str) -> dict:
         "obv": obv_vals,
         "obv_trend": obv_trend,
         "spike_signal": spike_signal,
+        "bb_upper": bb_upper.tolist(),
+        "bb_lower": bb_lower.tolist(),
+        "bb_mid": bb_mid.tolist(),
+        "bb_signal": bb_signal,
+        "atr": atr_vals,
+        "atr_mean": atr_mean_vals,
+        "atr_level": atr_level,
+        "atr_ratio": atr_ratio,
     }
 
 
@@ -286,6 +333,17 @@ def run_prediction(ticker: str, timeframe: str = "1w") -> dict:
             bearish_score += 1
             key_factors.append("Volume spike on down day — strong selling pressure")
 
+        # Bollinger Bands position
+        bb_sig = tech.get("bb_signal")
+        last_bb_upper = next((v for v in reversed(tech["bb_upper"]) if _valid(v)), None)
+        last_bb_lower = next((v for v in reversed(tech["bb_lower"]) if _valid(v)), None)
+        if bb_sig == "above_upper" and last_bb_upper:
+            bearish_score += 1
+            key_factors.append(f"Price above upper BB (${last_bb_upper:.2f}) — overbought")
+        elif bb_sig == "below_lower" and last_bb_lower:
+            bullish_score += 1
+            key_factors.append(f"Price below lower BB (${last_bb_lower:.2f}) — oversold")
+
     if bullish_score > bearish_score:
         direction = "bullish"
     elif bearish_score > bullish_score:
@@ -304,6 +362,17 @@ def run_prediction(ticker: str, timeframe: str = "1w") -> dict:
         change_pct = random.uniform(-0.05, 0.05)
     price_target = round(base_price * (1 + change_pct), 2)
 
+    # ATR-derived risk level and factor
+    risk_level = tech["atr_level"] if tech else random.choice(["low", "medium", "high"])
+    if tech:
+        last_atr = next((v for v in reversed(tech["atr"]) if _valid(v)), None)
+        if last_atr:
+            ratio = tech["atr_ratio"]
+            key_factors.append(
+                f"ATR={last_atr:.2f} ({ratio:.1f}× avg) — "
+                f"{'high' if ratio > 1.3 else 'low' if ratio < 0.8 else 'moderate'} volatility"
+            )
+
     timeframe_days = {"1d": 1, "1w": 7, "1m": 30, "3m": 90, "6m": 180}
     target_date = (datetime.now() + timedelta(days=timeframe_days.get(timeframe, 7))).strftime("%Y-%m-%d")
 
@@ -315,8 +384,8 @@ def run_prediction(ticker: str, timeframe: str = "1w") -> dict:
         "current_price": base_price,
         "price_target": price_target,
         "target_date": target_date,
-        "key_factors": key_factors[:5],
-        "risk_level": random.choice(["low", "medium", "high"]),
+        "key_factors": key_factors[:6],
+        "risk_level": risk_level,
         "technical": tech,
     }
 
@@ -337,7 +406,7 @@ def generate_chart(prediction: dict, charts_dir: str) -> str:
     risk_colors = {"low": "#26a69a", "medium": "#ffa726", "high": "#ef5350"}
     main_color = color_map[direction]
 
-    fig = plt.figure(figsize=(14, 17), facecolor="#0d1117")
+    fig = plt.figure(figsize=(14, 20), facecolor="#0d1117")
     change_pct = (target - current) / current * 100
     sign = "+" if change_pct >= 0 else ""
     fig.suptitle(
@@ -345,8 +414,8 @@ def generate_chart(prediction: dict, charts_dir: str) -> str:
         fontsize=15, fontweight="bold", color="white", y=0.99,
     )
     gs = gridspec.GridSpec(
-        5, 2, figure=fig,
-        height_ratios=[2.5, 1.2, 1.2, 1.2, 1.2],
+        6, 2, figure=fig,
+        height_ratios=[2.5, 1.2, 1.2, 1.2, 1.2, 1.2],
         hspace=0.55, wspace=0.35,
     )
 
@@ -382,6 +451,20 @@ def generate_chart(prediction: dict, charts_dir: str) -> str:
         if ve20:
             ax1.plot([p[0] for p in ve20], [p[1] for p in ve20],
                      color="#38bdf8", linewidth=1.1, linestyle="--", alpha=0.85, label="EMA20")
+
+        # Bollinger Bands overlay
+        bbu = tech["bb_upper"][-display_n:]
+        bbl = tech["bb_lower"][-display_n:]
+        bb_idx = [i for i in range(len(bbu)) if _valid(bbu[i]) and _valid(bbl[i])]
+        if bb_idx:
+            bx  = [xs[i] for i in bb_idx]
+            buy = [bbu[i] for i in bb_idx]
+            bly = [bbl[i] for i in bb_idx]
+            ax1.plot(bx, buy, color="#e879f9", linewidth=0.9,
+                     linestyle=":", alpha=0.8, label="BB Upper")
+            ax1.plot(bx, bly, color="#e879f9", linewidth=0.9,
+                     linestyle=":", alpha=0.8, label="BB Lower")
+            ax1.fill_between(bx, buy, bly, alpha=0.05, color="#e879f9")
 
         # Golden / Death Cross marker (only if within display window)
         cross_idx = tech.get("cross_idx")
@@ -651,63 +734,129 @@ def generate_chart(prediction: dict, charts_dir: str) -> str:
     for spine in ax6.spines.values():
         spine.set_edgecolor("#30363d")
 
-    # ── Panel 7: Confidence + Risk gauge ──────────────────────────────────
-    ax7 = fig.add_subplot(gs[4, 0])
+    # ── Panel 7: ATR (14) — full width ────────────────────────────────────
+    ax7 = fig.add_subplot(gs[4, :])
     ax7.set_facecolor("#161b22")
-    ax7.set_xlim(0, 1)
-    ax7.set_ylim(0, 1)
-    ax7.axis("off")
+
+    if tech:
+        n_all = len(tech["xs"])
+        display_n = min(126, n_all)
+        xs_a = list(range(display_n))
+        atr_vals  = tech["atr"][-display_n:]
+        atrm_vals = tech["atr_mean"][-display_n:]
+
+        valid_atr  = [(xs_a[i], atr_vals[i])  for i in range(len(atr_vals))  if _valid(atr_vals[i])]
+        valid_atrm = [(xs_a[i], atrm_vals[i]) for i in range(len(atrm_vals)) if _valid(atrm_vals[i])]
+
+        if valid_atr:
+            ax = [p[0] for p in valid_atr]
+            ay = [p[1] for p in valid_atr]
+            atr_color = (
+                "#ef5350" if tech["atr_level"] == "high"
+                else "#26a69a" if tech["atr_level"] == "low"
+                else "#ffa726"
+            )
+            ax7.plot(ax, ay, color=atr_color, linewidth=1.4, label="ATR (14)")
+
+        if valid_atrm:
+            ax7.plot([p[0] for p in valid_atrm], [p[1] for p in valid_atrm],
+                     color="#888888", linewidth=1.0, linestyle="--", alpha=0.7, label="ATR MA(20)")
+
+        if valid_atr and valid_atrm:
+            mx = [p[0] for p in valid_atrm]
+            my = [p[1] for p in valid_atrm]
+            atr_dict  = {p[0]: p[1] for p in valid_atr}
+            atrm_dict = {p[0]: p[1] for p in valid_atrm}
+            common = [x for x in mx if x in atr_dict]
+            if common:
+                ax7.fill_between(
+                    common,
+                    [atr_dict[x] for x in common],
+                    [atrm_dict[x] for x in common],
+                    where=[atr_dict[x] >= atrm_dict[x] for x in common],
+                    alpha=0.18, color="#ef5350", label="High vol",
+                )
+                ax7.fill_between(
+                    common,
+                    [atr_dict[x] for x in common],
+                    [atrm_dict[x] for x in common],
+                    where=[atr_dict[x] < atrm_dict[x] for x in common],
+                    alpha=0.18, color="#26a69a", label="Low vol",
+                )
+
+        last_atr_v = next((v for v in reversed(atr_vals) if _valid(v)), None)
+        ratio = tech.get("atr_ratio", 1.0)
+        level = tech.get("atr_level", "medium").capitalize()
+        atr_status = f"  ·  {last_atr_v:.2f}  ({ratio:.1f}× avg)  —  {level} volatility" if last_atr_v else ""
+        ax7.set_title(f"ATR (14){atr_status}", color="white", fontsize=10, pad=6)
+        ax7.legend(fontsize=6, loc="upper left", facecolor="#161b22",
+                   edgecolor="#30363d", labelcolor="white", framealpha=0.8, ncol=4)
+    else:
+        ax7.text(0.5, 0.5, "ATR unavailable", ha="center", va="center",
+                 color="gray", transform=ax7.transAxes)
+        ax7.set_title("ATR (14)", color="white", fontsize=10, pad=6)
+
+    ax7.tick_params(colors="gray", labelsize=7)
+    for spine in ax7.spines.values():
+        spine.set_edgecolor("#30363d")
+
+    # ── Panel 8: Confidence + Risk gauge ──────────────────────────────────
+    ax8 = fig.add_subplot(gs[5, 0])
+    ax8.set_facecolor("#161b22")
+    ax8.set_xlim(0, 1)
+    ax8.set_ylim(0, 1)
+    ax8.axis("off")
 
     theta = np.linspace(np.pi, np.pi * (1 - confidence), 100)
-    ax7.plot(
+    ax8.plot(
         0.3 + 0.22 * np.cos(np.linspace(np.pi, 0, 100)),
         0.55 + 0.22 * np.sin(np.linspace(np.pi, 0, 100)),
         color="#30363d", linewidth=10, solid_capstyle="round",
     )
-    ax7.plot(
+    ax8.plot(
         0.3 + 0.22 * np.cos(theta),
         0.55 + 0.22 * np.sin(theta),
         color=main_color, linewidth=10, solid_capstyle="round",
     )
-    ax7.text(0.3, 0.50, f"{int(confidence * 100)}%", ha="center", va="center",
+    ax8.text(0.3, 0.50, f"{int(confidence * 100)}%", ha="center", va="center",
              color="white", fontsize=18, fontweight="bold")
-    ax7.text(0.3, 0.20, "Confidence", ha="center", color="gray", fontsize=9)
+    ax8.text(0.3, 0.20, "Confidence", ha="center", color="gray", fontsize=9)
 
     risk_color = risk_colors[risk]
     pill = mpatches.FancyBboxPatch(
         (0.60, 0.42), 0.30, 0.18,
         boxstyle="round,pad=0.02", facecolor=risk_color, edgecolor="none", alpha=0.25,
     )
-    ax7.add_patch(pill)
-    ax7.text(0.75, 0.51, f"Risk: {risk.upper()}", ha="center", va="center",
+    ax8.add_patch(pill)
+    ax8.text(0.75, 0.51, f"Risk: {risk.upper()}", ha="center", va="center",
              color=risk_color, fontsize=10, fontweight="bold")
     direction_icon = {"bullish": "▲ BULLISH", "bearish": "▼ BEARISH", "neutral": "◆ NEUTRAL"}[direction]
-    ax7.text(0.75, 0.28, direction_icon, ha="center", color=main_color,
+    ax8.text(0.75, 0.28, direction_icon, ha="center", color=main_color,
              fontsize=11, fontweight="bold")
-    ax7.set_title("Confidence & Risk", color="white", fontsize=10, pad=6)
+    ax8.set_title("Confidence & Risk", color="white", fontsize=10, pad=6)
 
-    # ── Panel 8: Technical signal factors ─────────────────────────────────
-    ax8 = fig.add_subplot(gs[4, 1])
-    ax8.set_facecolor("#161b22")
+    # ── Panel 9: Technical signal factors ─────────────────────────────────
+    ax9 = fig.add_subplot(gs[5, 1])
+    ax9.set_facecolor("#161b22")
     if factors:
         y_pos = range(len(factors))
         weights = [random.uniform(0.6, 1.0) for _ in factors]
-        ax8.barh(list(y_pos), weights, color=main_color, alpha=0.8,
+        ax9.barh(list(y_pos), weights, color=main_color, alpha=0.8,
                  edgecolor="#30363d", height=0.5)
-        ax8.set_yticks(list(y_pos))
-        ax8.set_yticklabels(
+        ax9.set_yticks(list(y_pos))
+        ax9.set_yticklabels(
             [f[:30] + "…" if len(f) > 30 else f for f in factors],
             color="white", fontsize=7,
         )
-        ax8.set_xlim(0, 1.2)
-        ax8.set_xticks([0, 0.5, 1.0])
-        ax8.set_xticklabels(["Low", "Med", "High"], color="gray", fontsize=7)
+        ax9.set_xlim(0, 1.2)
+        ax9.set_xticks([0, 0.5, 1.0])
+        ax9.set_xticklabels(["Low", "Med", "High"], color="gray", fontsize=7)
     else:
-        ax8.text(0.5, 0.5, "No signals", ha="center", va="center",
-                 color="gray", transform=ax8.transAxes)
-    ax8.set_title("Technical Signal Factors", color="white", fontsize=10, pad=6)
-    ax8.tick_params(colors="gray")
-    for spine in ax8.spines.values():
+        ax9.text(0.5, 0.5, "No signals", ha="center", va="center",
+                 color="gray", transform=ax9.transAxes)
+    ax9.set_title("Technical Signal Factors", color="white", fontsize=10, pad=6)
+    ax9.tick_params(colors="gray")
+    for spine in ax9.spines.values():
         spine.set_edgecolor("#30363d")
 
     chart_path = os.path.join(charts_dir, f"{ticker}_{timeframe}.png")
