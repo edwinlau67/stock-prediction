@@ -67,6 +67,7 @@ def get_technical_indicators(ticker: str) -> dict:
     closes = hist["Close"]
     highs  = hist["High"]
     lows   = hist["Low"]
+    volume = hist["Volume"]
 
     # ── Trend indicators ──────────────────────────────────────────────────
     sma50 = closes.rolling(window=50).mean()
@@ -130,6 +131,29 @@ def get_technical_indicators(ticker: str) -> dict:
         elif sk[i-1] > sd[i-1] and sk[i] <= sd[i]:
             stoch_crossover = "bearish"
 
+    # ── Volume indicators ─────────────────────────────────────────────────
+    # OBV: add volume on up days, subtract on down days
+    obv = (np.sign(closes.diff()) * volume).fillna(0).cumsum()
+
+    # Volume spikes: day's volume > 20-day mean + 2 std deviations
+    vol_mean = volume.rolling(window=20).mean()
+    vol_std  = volume.rolling(window=20).std()
+    vol_spike = volume > (vol_mean + 2 * vol_std)
+
+    # OBV short-term trend: slope over last 10 valid bars
+    obv_vals = obv.tolist()
+    recent_obv = [v for v in obv_vals[-10:] if _valid(v)]
+    obv_trend = ("rising" if len(recent_obv) >= 2 and recent_obv[-1] > recent_obv[0]
+                 else "falling" if len(recent_obv) >= 2 else None)
+
+    # Most recent volume spike direction (up day or down day)
+    spike_signal = None
+    vspike = vol_spike.tolist()
+    cl = closes.tolist()
+    for i in range(1, len(vspike)):
+        if vspike[i] and _valid(cl[i]) and _valid(cl[i - 1]):
+            spike_signal = "bullish" if cl[i] > cl[i - 1] else "bearish"
+
     return {
         "xs": list(range(len(closes))),
         "closes": closes.tolist(),
@@ -146,6 +170,12 @@ def get_technical_indicators(ticker: str) -> dict:
         "stoch_k": sk,
         "stoch_d": sd,
         "stoch_crossover": stoch_crossover,
+        "volume": volume.tolist(),
+        "vol_mean": vol_mean.tolist(),
+        "vol_spike": vspike,
+        "obv": obv_vals,
+        "obv_trend": obv_trend,
+        "spike_signal": spike_signal,
     }
 
 
@@ -240,6 +270,22 @@ def run_prediction(ticker: str, timeframe: str = "1w") -> dict:
                 bearish_score += 1
                 key_factors.append(f"Stochastic overbought (%K={last_stoch_k:.1f})")
 
+        # OBV trend
+        if tech["obv_trend"] == "rising":
+            bullish_score += 1
+            key_factors.append("OBV rising — volume confirms buying pressure")
+        elif tech["obv_trend"] == "falling":
+            bearish_score += 1
+            key_factors.append("OBV falling — volume confirms selling pressure")
+
+        # Volume spike direction
+        if tech["spike_signal"] == "bullish":
+            bullish_score += 1
+            key_factors.append("Volume spike on up day — strong buying interest")
+        elif tech["spike_signal"] == "bearish":
+            bearish_score += 1
+            key_factors.append("Volume spike on down day — strong selling pressure")
+
     if bullish_score > bearish_score:
         direction = "bullish"
     elif bearish_score > bullish_score:
@@ -291,7 +337,7 @@ def generate_chart(prediction: dict, charts_dir: str) -> str:
     risk_colors = {"low": "#26a69a", "medium": "#ffa726", "high": "#ef5350"}
     main_color = color_map[direction]
 
-    fig = plt.figure(figsize=(14, 14), facecolor="#0d1117")
+    fig = plt.figure(figsize=(14, 17), facecolor="#0d1117")
     change_pct = (target - current) / current * 100
     sign = "+" if change_pct >= 0 else ""
     fig.suptitle(
@@ -299,8 +345,8 @@ def generate_chart(prediction: dict, charts_dir: str) -> str:
         fontsize=15, fontweight="bold", color="white", y=0.99,
     )
     gs = gridspec.GridSpec(
-        4, 2, figure=fig,
-        height_ratios=[2.5, 1.2, 1.2, 1.2],
+        5, 2, figure=fig,
+        height_ratios=[2.5, 1.2, 1.2, 1.2, 1.2],
         hspace=0.55, wspace=0.35,
     )
 
@@ -517,63 +563,151 @@ def generate_chart(prediction: dict, charts_dir: str) -> str:
     for spine in ax4.spines.values():
         spine.set_edgecolor("#30363d")
 
-    # ── Panel 5: Confidence + Risk gauge ──────────────────────────────────
+    # ── Panel 5: Volume + Spike markers ───────────────────────────────────
     ax5 = fig.add_subplot(gs[3, 0])
     ax5.set_facecolor("#161b22")
-    ax5.set_xlim(0, 1)
-    ax5.set_ylim(0, 1)
-    ax5.axis("off")
+
+    if tech:
+        n_all = len(tech["xs"])
+        display_n = min(126, n_all)
+        xs_v = list(range(display_n))
+        vol_vals  = tech["volume"][-display_n:]
+        vm_vals   = tech["vol_mean"][-display_n:]
+        spk_vals  = tech["vol_spike"][-display_n:]
+        cl_vals   = tech["closes"][-display_n:]
+        prev_cl   = tech["closes"][-(display_n + 1):-1]
+
+        bar_colors = []
+        for i in range(len(vol_vals)):
+            if i == 0 or not _valid(cl_vals[i]) or not _valid(prev_cl[i]):
+                bar_colors.append("#888888")
+            elif cl_vals[i] >= prev_cl[i]:
+                bar_colors.append("#26a69a")
+            else:
+                bar_colors.append("#ef5350")
+
+        ax5.bar(xs_v, vol_vals, color=bar_colors, alpha=0.7, width=1.0)
+
+        # Rolling mean line
+        valid_vm = [(xs_v[i], vm_vals[i]) for i in range(len(vm_vals)) if _valid(vm_vals[i])]
+        if valid_vm:
+            ax5.plot([p[0] for p in valid_vm], [p[1] for p in valid_vm],
+                     color="#ffa726", linewidth=1.1, label="Vol MA(20)")
+
+        # Spike markers
+        spike_xs = [xs_v[i] for i in range(len(spk_vals)) if spk_vals[i]]
+        spike_ys = [vol_vals[i] for i in spike_xs]
+        if spike_xs:
+            ax5.scatter(spike_xs, spike_ys, color="#ffd700", s=40,
+                        zorder=5, marker="^", label="Spike")
+
+        ax5.yaxis.set_major_formatter(
+            plt.FuncFormatter(lambda x, _: f"{x/1e6:.0f}M" if x >= 1e6 else f"{x/1e3:.0f}K")
+        )
+        ax5.set_title("Volume  (green=up day, red=down day, ▲=spike)",
+                      color="white", fontsize=10, pad=6)
+        ax5.legend(fontsize=6, loc="upper left", facecolor="#161b22",
+                   edgecolor="#30363d", labelcolor="white", framealpha=0.8)
+    else:
+        ax5.text(0.5, 0.5, "Volume unavailable", ha="center", va="center",
+                 color="gray", transform=ax5.transAxes)
+        ax5.set_title("Volume", color="white", fontsize=10, pad=6)
+
+    ax5.tick_params(colors="gray", labelsize=7)
+    for spine in ax5.spines.values():
+        spine.set_edgecolor("#30363d")
+
+    # ── Panel 6: OBV (On-Balance Volume) ──────────────────────────────────
+    ax6 = fig.add_subplot(gs[3, 1])
+    ax6.set_facecolor("#161b22")
+
+    if tech:
+        n_all = len(tech["xs"])
+        display_n = min(126, n_all)
+        xs_o = list(range(display_n))
+        obv_vals = tech["obv"][-display_n:]
+
+        valid_obv = [(xs_o[i], obv_vals[i]) for i in range(len(obv_vals)) if _valid(obv_vals[i])]
+        if valid_obv:
+            ox = [p[0] for p in valid_obv]
+            oy = [p[1] for p in valid_obv]
+            obv_color = "#26a69a" if tech["obv_trend"] == "rising" else "#ef5350"
+            ax6.plot(ox, oy, color=obv_color, linewidth=1.4, label="OBV")
+            ax6.fill_between(ox, oy, min(oy), alpha=0.12, color=obv_color)
+
+        trend_label = tech.get("obv_trend", "").capitalize() or "N/A"
+        ax6.set_title(f"OBV — {trend_label}", color="white", fontsize=10, pad=6)
+        ax6.yaxis.set_major_formatter(
+            plt.FuncFormatter(lambda x, _: f"{x/1e6:.1f}M" if abs(x) >= 1e6 else f"{x/1e3:.0f}K")
+        )
+        ax6.legend(fontsize=6, loc="upper left", facecolor="#161b22",
+                   edgecolor="#30363d", labelcolor="white", framealpha=0.8)
+    else:
+        ax6.text(0.5, 0.5, "OBV unavailable", ha="center", va="center",
+                 color="gray", transform=ax6.transAxes)
+        ax6.set_title("OBV", color="white", fontsize=10, pad=6)
+
+    ax6.tick_params(colors="gray", labelsize=7)
+    for spine in ax6.spines.values():
+        spine.set_edgecolor("#30363d")
+
+    # ── Panel 7: Confidence + Risk gauge ──────────────────────────────────
+    ax7 = fig.add_subplot(gs[4, 0])
+    ax7.set_facecolor("#161b22")
+    ax7.set_xlim(0, 1)
+    ax7.set_ylim(0, 1)
+    ax7.axis("off")
 
     theta = np.linspace(np.pi, np.pi * (1 - confidence), 100)
-    ax5.plot(
+    ax7.plot(
         0.3 + 0.22 * np.cos(np.linspace(np.pi, 0, 100)),
         0.55 + 0.22 * np.sin(np.linspace(np.pi, 0, 100)),
         color="#30363d", linewidth=10, solid_capstyle="round",
     )
-    ax5.plot(
+    ax7.plot(
         0.3 + 0.22 * np.cos(theta),
         0.55 + 0.22 * np.sin(theta),
         color=main_color, linewidth=10, solid_capstyle="round",
     )
-    ax5.text(0.3, 0.50, f"{int(confidence * 100)}%", ha="center", va="center",
+    ax7.text(0.3, 0.50, f"{int(confidence * 100)}%", ha="center", va="center",
              color="white", fontsize=18, fontweight="bold")
-    ax5.text(0.3, 0.20, "Confidence", ha="center", color="gray", fontsize=9)
+    ax7.text(0.3, 0.20, "Confidence", ha="center", color="gray", fontsize=9)
 
     risk_color = risk_colors[risk]
     pill = mpatches.FancyBboxPatch(
         (0.60, 0.42), 0.30, 0.18,
         boxstyle="round,pad=0.02", facecolor=risk_color, edgecolor="none", alpha=0.25,
     )
-    ax5.add_patch(pill)
-    ax5.text(0.75, 0.51, f"Risk: {risk.upper()}", ha="center", va="center",
+    ax7.add_patch(pill)
+    ax7.text(0.75, 0.51, f"Risk: {risk.upper()}", ha="center", va="center",
              color=risk_color, fontsize=10, fontweight="bold")
     direction_icon = {"bullish": "▲ BULLISH", "bearish": "▼ BEARISH", "neutral": "◆ NEUTRAL"}[direction]
-    ax5.text(0.75, 0.28, direction_icon, ha="center", color=main_color,
+    ax7.text(0.75, 0.28, direction_icon, ha="center", color=main_color,
              fontsize=11, fontweight="bold")
-    ax5.set_title("Confidence & Risk", color="white", fontsize=10, pad=6)
+    ax7.set_title("Confidence & Risk", color="white", fontsize=10, pad=6)
 
-    # ── Panel 6: Technical signal factors ─────────────────────────────────
-    ax6 = fig.add_subplot(gs[3, 1])
-    ax6.set_facecolor("#161b22")
+    # ── Panel 8: Technical signal factors ─────────────────────────────────
+    ax8 = fig.add_subplot(gs[4, 1])
+    ax8.set_facecolor("#161b22")
     if factors:
         y_pos = range(len(factors))
         weights = [random.uniform(0.6, 1.0) for _ in factors]
-        ax6.barh(list(y_pos), weights, color=main_color, alpha=0.8,
+        ax8.barh(list(y_pos), weights, color=main_color, alpha=0.8,
                  edgecolor="#30363d", height=0.5)
-        ax6.set_yticks(list(y_pos))
-        ax6.set_yticklabels(
+        ax8.set_yticks(list(y_pos))
+        ax8.set_yticklabels(
             [f[:30] + "…" if len(f) > 30 else f for f in factors],
             color="white", fontsize=7,
         )
-        ax6.set_xlim(0, 1.2)
-        ax6.set_xticks([0, 0.5, 1.0])
-        ax6.set_xticklabels(["Low", "Med", "High"], color="gray", fontsize=7)
+        ax8.set_xlim(0, 1.2)
+        ax8.set_xticks([0, 0.5, 1.0])
+        ax8.set_xticklabels(["Low", "Med", "High"], color="gray", fontsize=7)
     else:
-        ax6.text(0.5, 0.5, "No signals", ha="center", va="center",
-                 color="gray", transform=ax6.transAxes)
-    ax6.set_title("Technical Signal Factors", color="white", fontsize=10, pad=6)
-    ax6.tick_params(colors="gray")
-    for spine in ax6.spines.values():
+        ax8.text(0.5, 0.5, "No signals", ha="center", va="center",
+                 color="gray", transform=ax8.transAxes)
+    ax8.set_title("Technical Signal Factors", color="white", fontsize=10, pad=6)
+    ax8.tick_params(colors="gray")
+    for spine in ax8.spines.values():
         spine.set_edgecolor("#30363d")
 
     chart_path = os.path.join(charts_dir, f"{ticker}_{timeframe}.png")

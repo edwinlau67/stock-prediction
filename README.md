@@ -125,7 +125,7 @@ The `predictions.md` file contains a full analysis per ticker including a summar
 
 ### Analysis charts
 
-Each PNG chart contains 6 panels across 4 rows:
+Each PNG chart contains 8 panels across 5 rows:
 
 | Panel | Description |
 |-------|-------------|
@@ -133,6 +133,8 @@ Each PNG chart contains 6 panels across 4 rows:
 | **MACD (12, 26, 9)** | Histogram (green/red bars), MACD line, and signal line with current crossover status in the title |
 | **RSI (14)** | RSI line with overbought (>70) and oversold (<30) fill zones; current value and zone label in title |
 | **Stochastic (14, 3)** | %K (fast) and %D (signal) lines with overbought (>80) and oversold (<20) fill zones; current values in title |
+| **Volume + Spikes** | Bar chart coloured green (up day) / red (down day), 20-day mean line, and gold triangle markers for volume spikes (>2 std above mean) |
+| **OBV (On-Balance Volume)** | Cumulative OBV line coloured by trend (green=rising, red=falling) with fill; trend label in title |
 | **Confidence & Risk** | Arc gauge showing confidence %, risk pill, and direction label |
 | **Technical Signal Factors** | Horizontal bar chart of the indicator signals that drove the prediction direction |
 
@@ -152,6 +154,8 @@ The prediction engine computes these trend-following indicators on 1 year of dai
 | **Price vs SMA50/200** | Whether price trades above or below each MA (+1 pt each) |
 | **RSI (14)** | <30 oversold = bullish (+2 pts), >70 overbought = bearish (+2 pts), above/below 50 midline (+1 pt) |
 | **Stochastic (14, 3)** | %K/%D crossover (+1 pt); %K <20 oversold = bullish (+1 pt), >80 overbought = bearish (+1 pt) |
+| **OBV** | Rising OBV = bullish (+1 pt), falling OBV = bearish (+1 pt) |
+| **Volume Spike** | Spike on up day = bullish (+1 pt), spike on down day = bearish (+1 pt); spike = volume > 20-day mean + 2σ |
 
 Direction (`bullish` / `bearish` / `neutral`) and confidence are derived by scoring these signals — no random guessing.
 
