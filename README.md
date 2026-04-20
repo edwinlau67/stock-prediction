@@ -125,16 +125,17 @@ The `predictions.md` file contains a full analysis per ticker including a summar
 
 ### Analysis charts
 
-Each PNG chart contains 9 panels across 6 rows:
+Each PNG chart contains 10 panels across 7 rows:
 
 | Panel | Description |
 |-------|-------------|
-| **Price + SMA50/200/EMA20 + BB + Target** | 6-month daily price with SMA50 (amber), SMA200 (purple), EMA20 (blue dashed), Bollinger Bands (pink dotted with fill), Golden/Death Cross marker, and projected target |
+| **Price + MA + BB + Trendlines + Target** | 6-month price with SMA50/200, EMA20, Bollinger Bands (pink), support (cyan dash-dot) and resistance (pink dash-dot) trendlines, Golden/Death Cross, and projected target |
 | **MACD (12, 26, 9)** | Histogram (green/red bars), MACD line, and signal line with current crossover status in the title |
 | **RSI (14)** | RSI line with overbought (>70) and oversold (<30) fill zones; current value and zone label in title |
 | **Stochastic (14, 3)** | %K (fast) and %D (signal) lines with overbought (>80) and oversold (<20) fill zones; current values in title |
 | **Volume + Spikes** | Bar chart coloured green (up day) / red (down day), 20-day mean line, and gold triangle markers for volume spikes (>2σ above mean) |
 | **OBV (On-Balance Volume)** | Cumulative OBV line coloured by trend (green=rising, red=falling) with fill; trend label in title |
+| **Support & Resistance** | Last 60 days of price with Fibonacci retracement levels (0%–100%), standard Pivot Points (PP/R1/R2/S1/S2), and trendlines — all labelled with price values |
 | **ATR (14)** | ATR line coloured by volatility level, 20-day ATR mean (dashed), fill shaded red above mean / green below; current value and ratio in title |
 | **Confidence & Risk** | Arc gauge showing confidence %, risk pill (ATR-derived), and direction label |
 | **Technical Signal Factors** | Horizontal bar chart of the indicator signals that drove the prediction direction |
@@ -159,6 +160,9 @@ The prediction engine computes these trend-following indicators on 1 year of dai
 | **Volume Spike** | Spike on up day = bullish (+1 pt), spike on down day = bearish (+1 pt); spike = volume > 20-day mean + 2σ |
 | **Bollinger Bands (20, 2)** | Price above upper band = overbought → bearish (+1 pt); price below lower band = oversold → bullish (+1 pt) |
 | **ATR (14)** | Drives the `risk_level` field: ATR > 1.3× 20-day avg = high, < 0.8× = low, otherwise medium; also reported as a key factor |
+| **Trendlines** | Rising support trendline + price above it = bullish (+1 pt); price breaks below support = bearish (+1 pt); detected via 5-bar swing point window |
+| **Pivot Points** | Price above PP = bullish (+1 pt), below = bearish (+1 pt); PP/R1/R2/S1/S2 computed from most recent bar's H, L, C |
+| **Fibonacci Retracement** | 6-month H/L range; 38.2%, 50%, 61.8% levels shown as key support/resistance reference lines (visual context, not scored) |
 
 Direction (`bullish` / `bearish` / `neutral`) and confidence are derived by scoring these signals — no random guessing.
 

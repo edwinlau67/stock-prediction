@@ -189,9 +189,72 @@ def get_technical_indicators(ticker: str) -> dict:
     spike_signal = None
     vspike = vol_spike.tolist()
     cl = closes.tolist()
+    hl_list = highs.tolist()
+    lo_list = lows.tolist()
     for i in range(1, len(vspike)):
         if vspike[i] and _valid(cl[i]) and _valid(cl[i - 1]):
             spike_signal = "bullish" if cl[i] > cl[i - 1] else "bearish"
+
+    # ── Support & Resistance ──────────────────────────────────────────────
+    n_bars = len(cl)
+    sw_win = 5  # bars each side for swing point detection
+
+    swing_highs, swing_lows = [], []
+    for i in range(sw_win, n_bars - sw_win):
+        seg = cl[i - sw_win: i + sw_win + 1]
+        if cl[i] == max(seg):
+            swing_highs.append(i)
+        if cl[i] == min(seg):
+            swing_lows.append(i)
+
+    # Resistance trendline: last 2 swing highs
+    resistance_line = None
+    if len(swing_highs) >= 2:
+        rx1, rx2 = swing_highs[-2], swing_highs[-1]
+        ry1, ry2 = cl[rx1], cl[rx2]
+        rslope = (ry2 - ry1) / (rx2 - rx1) if rx2 != rx1 else 0
+        resistance_line = {"x1": rx1, "y1": ry1, "x2": rx2, "y2": ry2, "slope": rslope}
+
+    # Support trendline: last 2 swing lows
+    support_line = None
+    if len(swing_lows) >= 2:
+        sx1, sx2 = swing_lows[-2], swing_lows[-1]
+        sy1, sy2 = cl[sx1], cl[sx2]
+        sslope = (sy2 - sy1) / (sx2 - sx1) if sx2 != sx1 else 0
+        support_line = {"x1": sx1, "y1": sy1, "x2": sx2, "y2": sy2, "slope": sslope}
+
+    # Trendline signal: price vs projected support at current bar
+    trendline_signal = None
+    if support_line:
+        proj_y = support_line["y2"] + support_line["slope"] * (n_bars - 1 - support_line["x2"])
+        trendline_signal = "above_support" if cl[-1] > proj_y else "below_support"
+
+    # Fibonacci retracement (last 126 trading days of H/L)
+    fib_hi = max(hl_list[-126:]) if len(hl_list) >= 126 else max(hl_list)
+    fib_lo = min(lo_list[-126:]) if len(lo_list) >= 126 else min(lo_list)
+    fib_rng = fib_hi - fib_lo
+    fib_levels = {
+        "0.0%":  round(fib_hi, 2),
+        "23.6%": round(fib_hi - 0.236 * fib_rng, 2),
+        "38.2%": round(fib_hi - 0.382 * fib_rng, 2),
+        "50.0%": round(fib_hi - 0.500 * fib_rng, 2),
+        "61.8%": round(fib_hi - 0.618 * fib_rng, 2),
+        "78.6%": round(fib_hi - 0.786 * fib_rng, 2),
+        "100%":  round(fib_lo, 2),
+    }
+
+    # Pivot Points (standard, from last completed bar)
+    pp_h = float(highs.iloc[-1])
+    pp_l = float(lows.iloc[-1])
+    pp_c = float(closes.iloc[-1])
+    pp = (pp_h + pp_l + pp_c) / 3
+    pivot_points = {
+        "PP": round(pp, 2),
+        "R1": round(2 * pp - pp_l, 2),
+        "R2": round(pp + (pp_h - pp_l), 2),
+        "S1": round(2 * pp - pp_h, 2),
+        "S2": round(pp - (pp_h - pp_l), 2),
+    }
 
     return {
         "xs": list(range(len(closes))),
@@ -223,6 +286,12 @@ def get_technical_indicators(ticker: str) -> dict:
         "atr_mean": atr_mean_vals,
         "atr_level": atr_level,
         "atr_ratio": atr_ratio,
+        "support_line": support_line,
+        "resistance_line": resistance_line,
+        "trendline_signal": trendline_signal,
+        "fib_levels": fib_levels,
+        "pivot_points": pivot_points,
+        "n_bars": n_bars,
     }
 
 
@@ -333,6 +402,27 @@ def run_prediction(ticker: str, timeframe: str = "1w") -> dict:
             bearish_score += 1
             key_factors.append("Volume spike on down day — strong selling pressure")
 
+        # Trendlines
+        if tech.get("trendline_signal") == "above_support":
+            sl_data = tech.get("support_line", {})
+            if sl_data and sl_data.get("slope", 0) > 0:
+                bullish_score += 1
+                key_factors.append("Price above rising support trendline")
+            else:
+                key_factors.append("Price above support trendline")
+        elif tech.get("trendline_signal") == "below_support":
+            bearish_score += 1
+            key_factors.append("Price broke below support trendline")
+
+        # Pivot Points
+        pp_val = tech["pivot_points"]["PP"]
+        if base_price > pp_val:
+            bullish_score += 1
+            key_factors.append(f"Price above Pivot Point (${pp_val:.2f})")
+        else:
+            bearish_score += 1
+            key_factors.append(f"Price below Pivot Point (${pp_val:.2f})")
+
         # Bollinger Bands position
         bb_sig = tech.get("bb_signal")
         last_bb_upper = next((v for v in reversed(tech["bb_upper"]) if _valid(v)), None)
@@ -406,7 +496,7 @@ def generate_chart(prediction: dict, charts_dir: str) -> str:
     risk_colors = {"low": "#26a69a", "medium": "#ffa726", "high": "#ef5350"}
     main_color = color_map[direction]
 
-    fig = plt.figure(figsize=(14, 20), facecolor="#0d1117")
+    fig = plt.figure(figsize=(14, 24), facecolor="#0d1117")
     change_pct = (target - current) / current * 100
     sign = "+" if change_pct >= 0 else ""
     fig.suptitle(
@@ -414,8 +504,8 @@ def generate_chart(prediction: dict, charts_dir: str) -> str:
         fontsize=15, fontweight="bold", color="white", y=0.99,
     )
     gs = gridspec.GridSpec(
-        6, 2, figure=fig,
-        height_ratios=[2.5, 1.2, 1.2, 1.2, 1.2, 1.2],
+        7, 2, figure=fig,
+        height_ratios=[2.5, 1.2, 1.2, 1.2, 1.2, 2.0, 1.2],
         hspace=0.55, wspace=0.35,
     )
 
@@ -466,6 +556,29 @@ def generate_chart(prediction: dict, charts_dir: str) -> str:
                      linestyle=":", alpha=0.8, label="BB Lower")
             ax1.fill_between(bx, buy, bly, alpha=0.05, color="#e879f9")
 
+        last_x = xs[-1]
+        proj_len = max(4, display_n // 8)
+
+        # Trendline overlays (support = cyan dash-dot, resistance = pink dash-dot)
+        for tl_key, tl_color, tl_label in [
+            ("support_line",    "#22d3ee", "Support TL"),
+            ("resistance_line", "#f472b6", "Resistance TL"),
+        ]:
+            tl = tech.get(tl_key)
+            if tl:
+                n_all_tl = tech["n_bars"]
+                x2d = tl["x2"] - (n_all_tl - display_n)
+                if x2d >= 0:
+                    x_ext = last_x + proj_len
+                    x1d = max(tl["x1"] - (n_all_tl - display_n), 0)
+                    tl_xs = [x1d, x_ext]
+                    tl_ys = [
+                        tl["y2"] + tl["slope"] * (x1d - x2d),
+                        tl["y2"] + tl["slope"] * (x_ext - x2d),
+                    ]
+                    ax1.plot(tl_xs, tl_ys, color=tl_color, linewidth=1.1,
+                             linestyle="-.", alpha=0.85, label=tl_label)
+
         # Golden / Death Cross marker (only if within display window)
         cross_idx = tech.get("cross_idx")
         if cross_idx is not None:
@@ -479,8 +592,6 @@ def generate_chart(prediction: dict, charts_dir: str) -> str:
                             marker="*" if is_golden else "X", label=cx_label)
 
         # Target projection arrow
-        last_x = xs[-1]
-        proj_len = max(4, display_n // 8)
         proj_x = [last_x, last_x + proj_len]
         proj_y = [closes[-1], target]
         ax1.plot(proj_x, proj_y, "--", color=main_color, linewidth=1.5, alpha=0.8)
@@ -734,9 +845,80 @@ def generate_chart(prediction: dict, charts_dir: str) -> str:
     for spine in ax6.spines.values():
         spine.set_edgecolor("#30363d")
 
-    # ── Panel 7: ATR (14) — full width ────────────────────────────────────
+    # ── Panel 7: Support & Resistance — full width ────────────────────────
     ax7 = fig.add_subplot(gs[4, :])
     ax7.set_facecolor("#161b22")
+
+    if tech:
+        n_all = len(tech["xs"])
+        sr_n = min(60, n_all)           # last 60 days for S&R detail
+        sr_xs = list(range(sr_n))
+        sr_cl = tech["closes"][-sr_n:]
+        sr_offset = n_all - sr_n
+
+        ax7.plot(sr_xs, sr_cl, color=main_color, linewidth=1.4, label="Price", zorder=3)
+        ax7.fill_between(sr_xs, sr_cl, alpha=0.07, color=main_color)
+
+        # Fibonacci levels
+        fib_colors = {
+            "0.0%":  "#94a3b8", "23.6%": "#60a5fa", "38.2%": "#818cf8",
+            "50.0%": "#a78bfa", "61.8%": "#c084fc", "78.6%": "#e879f9", "100%": "#94a3b8",
+        }
+        key_fibs = {"38.2%", "50.0%", "61.8%"}
+        for label, price_val in tech["fib_levels"].items():
+            lw = 1.2 if label in key_fibs else 0.7
+            ls = "--" if label in key_fibs else ":"
+            ax7.axhline(price_val, color=fib_colors.get(label, "#888"),
+                        linewidth=lw, linestyle=ls, alpha=0.8)
+            ax7.text(sr_n - 0.5, price_val, f" Fib {label} ${price_val:.2f}",
+                     color=fib_colors.get(label, "#888"), fontsize=6, va="center")
+
+        # Pivot Points
+        pv = tech["pivot_points"]
+        pv_styles = {
+            "R2": ("#ef5350", "-",  0.8), "R1": ("#ef9a9a", "--", 0.8),
+            "PP": ("#ffd700", "-",  1.0),
+            "S1": ("#a5d6a7", "--", 0.8), "S2": ("#26a69a", "-",  0.8),
+        }
+        for name, price_val in pv.items():
+            col, ls, lw = pv_styles[name]
+            ax7.axhline(price_val, color=col, linewidth=lw, linestyle=ls, alpha=0.85)
+            ax7.text(0.5, price_val, f" {name} ${price_val:.2f}",
+                     color=col, fontsize=6, va="center")
+
+        # Trendlines on S&R panel
+        for tl_key, tl_color, tl_lbl in [
+            ("support_line", "#22d3ee", "Support"), ("resistance_line", "#f472b6", "Resist."),
+        ]:
+            tl = tech.get(tl_key)
+            if tl:
+                x2d = tl["x2"] - sr_offset
+                if x2d >= 0:
+                    x1d = max(tl["x1"] - sr_offset, 0)
+                    x_end = sr_n - 1
+                    tl_ys = [
+                        tl["y2"] + tl["slope"] * (x1d - x2d),
+                        tl["y2"] + tl["slope"] * (x_end - x2d),
+                    ]
+                    ax7.plot([x1d, x_end], tl_ys, color=tl_color,
+                             linewidth=1.2, linestyle="-.", alpha=0.9, label=tl_lbl)
+
+        ax7.set_title("Support & Resistance  (Fib Retracement · Pivot Points · Trendlines)",
+                      color="white", fontsize=10, pad=6)
+        ax7.legend(fontsize=6, loc="upper left", facecolor="#161b22",
+                   edgecolor="#30363d", labelcolor="white", framealpha=0.8)
+    else:
+        ax7.text(0.5, 0.5, "S&R unavailable", ha="center", va="center",
+                 color="gray", transform=ax7.transAxes)
+        ax7.set_title("Support & Resistance", color="white", fontsize=10, pad=6)
+
+    ax7.tick_params(colors="gray", labelsize=7)
+    for spine in ax7.spines.values():
+        spine.set_edgecolor("#30363d")
+
+    # ── Panel 8: ATR (14) — full width ────────────────────────────────────
+    ax8_atr = fig.add_subplot(gs[5, :])
+    ax8_atr.set_facecolor("#161b22")
 
     if tech:
         n_all = len(tech["xs"])
@@ -749,34 +931,32 @@ def generate_chart(prediction: dict, charts_dir: str) -> str:
         valid_atrm = [(xs_a[i], atrm_vals[i]) for i in range(len(atrm_vals)) if _valid(atrm_vals[i])]
 
         if valid_atr:
-            ax = [p[0] for p in valid_atr]
-            ay = [p[1] for p in valid_atr]
+            ax_x = [p[0] for p in valid_atr]
+            ax_y = [p[1] for p in valid_atr]
             atr_color = (
                 "#ef5350" if tech["atr_level"] == "high"
                 else "#26a69a" if tech["atr_level"] == "low"
                 else "#ffa726"
             )
-            ax7.plot(ax, ay, color=atr_color, linewidth=1.4, label="ATR (14)")
+            ax8_atr.plot(ax_x, ax_y, color=atr_color, linewidth=1.4, label="ATR (14)")
 
         if valid_atrm:
-            ax7.plot([p[0] for p in valid_atrm], [p[1] for p in valid_atrm],
-                     color="#888888", linewidth=1.0, linestyle="--", alpha=0.7, label="ATR MA(20)")
+            ax8_atr.plot([p[0] for p in valid_atrm], [p[1] for p in valid_atrm],
+                         color="#888888", linewidth=1.0, linestyle="--", alpha=0.7, label="ATR MA(20)")
 
         if valid_atr and valid_atrm:
-            mx = [p[0] for p in valid_atrm]
-            my = [p[1] for p in valid_atrm]
             atr_dict  = {p[0]: p[1] for p in valid_atr}
             atrm_dict = {p[0]: p[1] for p in valid_atrm}
-            common = [x for x in mx if x in atr_dict]
+            common = [x for x in atrm_dict if x in atr_dict]
             if common:
-                ax7.fill_between(
+                ax8_atr.fill_between(
                     common,
                     [atr_dict[x] for x in common],
                     [atrm_dict[x] for x in common],
                     where=[atr_dict[x] >= atrm_dict[x] for x in common],
                     alpha=0.18, color="#ef5350", label="High vol",
                 )
-                ax7.fill_between(
+                ax8_atr.fill_between(
                     common,
                     [atr_dict[x] for x in common],
                     [atrm_dict[x] for x in common],
@@ -788,20 +968,20 @@ def generate_chart(prediction: dict, charts_dir: str) -> str:
         ratio = tech.get("atr_ratio", 1.0)
         level = tech.get("atr_level", "medium").capitalize()
         atr_status = f"  ·  {last_atr_v:.2f}  ({ratio:.1f}× avg)  —  {level} volatility" if last_atr_v else ""
-        ax7.set_title(f"ATR (14){atr_status}", color="white", fontsize=10, pad=6)
-        ax7.legend(fontsize=6, loc="upper left", facecolor="#161b22",
-                   edgecolor="#30363d", labelcolor="white", framealpha=0.8, ncol=4)
+        ax8_atr.set_title(f"ATR (14){atr_status}", color="white", fontsize=10, pad=6)
+        ax8_atr.legend(fontsize=6, loc="upper left", facecolor="#161b22",
+                       edgecolor="#30363d", labelcolor="white", framealpha=0.8, ncol=4)
     else:
-        ax7.text(0.5, 0.5, "ATR unavailable", ha="center", va="center",
-                 color="gray", transform=ax7.transAxes)
-        ax7.set_title("ATR (14)", color="white", fontsize=10, pad=6)
+        ax8_atr.text(0.5, 0.5, "ATR unavailable", ha="center", va="center",
+                     color="gray", transform=ax8_atr.transAxes)
+        ax8_atr.set_title("ATR (14)", color="white", fontsize=10, pad=6)
 
-    ax7.tick_params(colors="gray", labelsize=7)
-    for spine in ax7.spines.values():
+    ax8_atr.tick_params(colors="gray", labelsize=7)
+    for spine in ax8_atr.spines.values():
         spine.set_edgecolor("#30363d")
 
-    # ── Panel 8: Confidence + Risk gauge ──────────────────────────────────
-    ax8 = fig.add_subplot(gs[5, 0])
+    # ── Panel 9: Confidence + Risk gauge ──────────────────────────────────
+    ax8 = fig.add_subplot(gs[6, 0])
     ax8.set_facecolor("#161b22")
     ax8.set_xlim(0, 1)
     ax8.set_ylim(0, 1)
@@ -835,8 +1015,8 @@ def generate_chart(prediction: dict, charts_dir: str) -> str:
              fontsize=11, fontweight="bold")
     ax8.set_title("Confidence & Risk", color="white", fontsize=10, pad=6)
 
-    # ── Panel 9: Technical signal factors ─────────────────────────────────
-    ax9 = fig.add_subplot(gs[5, 1])
+    # ── Panel 10: Technical signal factors ────────────────────────────────
+    ax9 = fig.add_subplot(gs[6, 1])
     ax9.set_facecolor("#161b22")
     if factors:
         y_pos = range(len(factors))
