@@ -62,10 +62,13 @@ def _valid(v) -> bool:
 
 
 def get_technical_indicators(ticker: str) -> dict:
-    """Fetch 1 year of daily closes and compute trend-following indicators."""
+    """Fetch 1 year of daily OHLC and compute trend and momentum indicators."""
     hist = yf.Ticker(ticker).history(period="1y", interval="1d")
     closes = hist["Close"]
+    highs  = hist["High"]
+    lows   = hist["Low"]
 
+    # ── Trend indicators ──────────────────────────────────────────────────
     sma50 = closes.rolling(window=50).mean()
     sma200 = closes.rolling(window=200).mean()
     ema20 = closes.ewm(span=20, adjust=False).mean()
@@ -75,12 +78,28 @@ def get_technical_indicators(ticker: str) -> dict:
     signal_line = macd_line.ewm(span=9, adjust=False).mean()
     histogram = macd_line - signal_line
 
+    # ── Momentum indicators ───────────────────────────────────────────────
+    # RSI (14-period)
+    delta = closes.diff()
+    gain = delta.clip(lower=0).rolling(window=14).mean()
+    loss = (-delta.clip(upper=0)).rolling(window=14).mean()
+    rs = gain / loss
+    rsi = 100 - (100 / (1 + rs))
+
+    # Stochastic Oscillator — %K (14-period), %D (3-period SMA of %K)
+    low14  = lows.rolling(window=14).min()
+    high14 = highs.rolling(window=14).max()
+    stoch_k = 100 * (closes - low14) / (high14 - low14)
+    stoch_d = stoch_k.rolling(window=3).mean()
+
     s50 = sma50.tolist()
     s200 = sma200.tolist()
     ml = macd_line.tolist()
     sl = signal_line.tolist()
+    sk = stoch_k.tolist()
+    sd = stoch_d.tolist()
 
-    # Most recent Golden Cross / Death Cross over the full year
+    # Most recent Golden Cross / Death Cross
     cross_signal = None
     cross_idx = None
     for i in range(1, len(s50)):
@@ -91,7 +110,7 @@ def get_technical_indicators(ticker: str) -> dict:
         elif s50[i-1] > s200[i-1] and s50[i] <= s200[i]:
             cross_signal, cross_idx = "death", i
 
-    # Most recent MACD line / signal-line crossover
+    # Most recent MACD crossover
     macd_crossover = None
     for i in range(1, len(ml)):
         if not all(_valid(v) for v in [ml[i-1], sl[i-1], ml[i], sl[i]]):
@@ -100,6 +119,16 @@ def get_technical_indicators(ticker: str) -> dict:
             macd_crossover = "bullish"
         elif ml[i-1] > sl[i-1] and ml[i] <= sl[i]:
             macd_crossover = "bearish"
+
+    # Most recent Stochastic %K / %D crossover
+    stoch_crossover = None
+    for i in range(1, len(sk)):
+        if not all(_valid(v) for v in [sk[i-1], sd[i-1], sk[i], sd[i]]):
+            continue
+        if sk[i-1] < sd[i-1] and sk[i] >= sd[i]:
+            stoch_crossover = "bullish"
+        elif sk[i-1] > sd[i-1] and sk[i] <= sd[i]:
+            stoch_crossover = "bearish"
 
     return {
         "xs": list(range(len(closes))),
@@ -113,6 +142,10 @@ def get_technical_indicators(ticker: str) -> dict:
         "cross_signal": cross_signal,
         "cross_idx": cross_idx,
         "macd_crossover": macd_crossover,
+        "rsi": rsi.tolist(),
+        "stoch_k": sk,
+        "stoch_d": sd,
+        "stoch_crossover": stoch_crossover,
     }
 
 
@@ -175,6 +208,38 @@ def run_prediction(ticker: str, timeframe: str = "1w") -> dict:
                 bearish_score += 1
                 key_factors.append(f"Price below SMA200 (${last_sma200:.2f})")
 
+        # RSI (14-period)
+        last_rsi = next((v for v in reversed(tech["rsi"]) if _valid(v)), None)
+        if last_rsi is not None:
+            if last_rsi < 30:
+                bullish_score += 2
+                key_factors.append(f"RSI oversold ({last_rsi:.1f}) — potential reversal up")
+            elif last_rsi > 70:
+                bearish_score += 2
+                key_factors.append(f"RSI overbought ({last_rsi:.1f}) — potential reversal down")
+            elif last_rsi >= 50:
+                bullish_score += 1
+                key_factors.append(f"RSI bullish momentum ({last_rsi:.1f})")
+            else:
+                bearish_score += 1
+                key_factors.append(f"RSI bearish momentum ({last_rsi:.1f})")
+
+        # Stochastic Oscillator
+        last_stoch_k = next((v for v in reversed(tech["stoch_k"]) if _valid(v)), None)
+        if tech["stoch_crossover"] == "bullish":
+            bullish_score += 1
+            key_factors.append("Stochastic %K crossed above %D (bullish)")
+        elif tech["stoch_crossover"] == "bearish":
+            bearish_score += 1
+            key_factors.append("Stochastic %K crossed below %D (bearish)")
+        if last_stoch_k is not None:
+            if last_stoch_k < 20:
+                bullish_score += 1
+                key_factors.append(f"Stochastic oversold (%K={last_stoch_k:.1f})")
+            elif last_stoch_k > 80:
+                bearish_score += 1
+                key_factors.append(f"Stochastic overbought (%K={last_stoch_k:.1f})")
+
     if bullish_score > bearish_score:
         direction = "bullish"
     elif bearish_score > bullish_score:
@@ -226,7 +291,7 @@ def generate_chart(prediction: dict, charts_dir: str) -> str:
     risk_colors = {"low": "#26a69a", "medium": "#ffa726", "high": "#ef5350"}
     main_color = color_map[direction]
 
-    fig = plt.figure(figsize=(14, 11), facecolor="#0d1117")
+    fig = plt.figure(figsize=(14, 14), facecolor="#0d1117")
     change_pct = (target - current) / current * 100
     sign = "+" if change_pct >= 0 else ""
     fig.suptitle(
@@ -234,9 +299,9 @@ def generate_chart(prediction: dict, charts_dir: str) -> str:
         fontsize=15, fontweight="bold", color="white", y=0.99,
     )
     gs = gridspec.GridSpec(
-        3, 2, figure=fig,
-        height_ratios=[2.5, 1.5, 1.5],
-        hspace=0.52, wspace=0.35,
+        4, 2, figure=fig,
+        height_ratios=[2.5, 1.2, 1.2, 1.2],
+        hspace=0.55, wspace=0.35,
     )
 
     # ── Panel 1: Price + SMA50/200 + EMA20 + Golden/Death Cross (full width) ──
@@ -357,63 +422,158 @@ def generate_chart(prediction: dict, charts_dir: str) -> str:
     for spine in ax2.spines.values():
         spine.set_edgecolor("#30363d")
 
-    # ── Panel 3: Confidence + Risk gauge ──────────────────────────────────
+    # ── Panel 3: RSI (14) ─────────────────────────────────────────────────
     ax3 = fig.add_subplot(gs[2, 0])
     ax3.set_facecolor("#161b22")
-    ax3.set_xlim(0, 1)
-    ax3.set_ylim(0, 1)
-    ax3.axis("off")
+
+    if tech:
+        n_all = len(tech["xs"])
+        display_n = min(126, n_all)
+        xs_r = list(range(display_n))
+        rsi_vals = tech["rsi"][-display_n:]
+
+        valid_rsi = [(xs_r[i], rsi_vals[i]) for i in range(len(rsi_vals)) if _valid(rsi_vals[i])]
+        if valid_rsi:
+            rx = [p[0] for p in valid_rsi]
+            ry = [p[1] for p in valid_rsi]
+            ax3.plot(rx, ry, color="#38bdf8", linewidth=1.4, label="RSI (14)")
+            ax3.fill_between(rx, ry, 70, where=[v > 70 for v in ry],
+                             color="#ef5350", alpha=0.25, label="Overbought")
+            ax3.fill_between(rx, ry, 30, where=[v < 30 for v in ry],
+                             color="#26a69a", alpha=0.25, label="Oversold")
+
+        ax3.axhline(70, color="#ef5350", linewidth=0.8, linestyle="--", alpha=0.7)
+        ax3.axhline(50, color="#888888", linewidth=0.6, linestyle=":")
+        ax3.axhline(30, color="#26a69a", linewidth=0.8, linestyle="--", alpha=0.7)
+        ax3.set_ylim(0, 100)
+        ax3.set_yticks([30, 50, 70])
+        ax3.set_yticklabels(["30", "50", "70"], color="gray", fontsize=7)
+
+        last_rsi = next((v for v in reversed(rsi_vals) if _valid(v)), None)
+        rsi_status = f"  ·  {last_rsi:.1f}" if last_rsi is not None else ""
+        rsi_label = (" — Overbought" if last_rsi and last_rsi > 70
+                     else " — Oversold" if last_rsi and last_rsi < 30 else "")
+        ax3.set_title(f"RSI (14){rsi_status}{rsi_label}", color="white", fontsize=10, pad=6)
+        ax3.legend(fontsize=6, loc="upper left", facecolor="#161b22",
+                   edgecolor="#30363d", labelcolor="white", framealpha=0.8)
+    else:
+        ax3.text(0.5, 0.5, "RSI unavailable", ha="center", va="center",
+                 color="gray", transform=ax3.transAxes)
+        ax3.set_title("RSI (14)", color="white", fontsize=10, pad=6)
+
+    ax3.tick_params(colors="gray", labelsize=7)
+    for spine in ax3.spines.values():
+        spine.set_edgecolor("#30363d")
+
+    # ── Panel 4: Stochastic Oscillator (%K 14, %D 3) ─────────────────────
+    ax4 = fig.add_subplot(gs[2, 1])
+    ax4.set_facecolor("#161b22")
+
+    if tech:
+        n_all = len(tech["xs"])
+        display_n = min(126, n_all)
+        xs_s = list(range(display_n))
+        sk_vals = tech["stoch_k"][-display_n:]
+        sd_vals = tech["stoch_d"][-display_n:]
+
+        valid_sk = [(xs_s[i], sk_vals[i]) for i in range(len(sk_vals)) if _valid(sk_vals[i])]
+        valid_sd = [(xs_s[i], sd_vals[i]) for i in range(len(sd_vals)) if _valid(sd_vals[i])]
+
+        if valid_sk:
+            skx = [p[0] for p in valid_sk]
+            sky = [p[1] for p in valid_sk]
+            ax4.plot(skx, sky, color="#a78bfa", linewidth=1.4, label="%K (14)")
+            ax4.fill_between(skx, sky, 80, where=[v > 80 for v in sky],
+                             color="#ef5350", alpha=0.20)
+            ax4.fill_between(skx, sky, 20, where=[v < 20 for v in sky],
+                             color="#26a69a", alpha=0.20)
+        if valid_sd:
+            ax4.plot([p[0] for p in valid_sd], [p[1] for p in valid_sd],
+                     color="#ffa726", linewidth=1.1, linestyle="--", label="%D (3)")
+
+        ax4.axhline(80, color="#ef5350", linewidth=0.8, linestyle="--", alpha=0.7)
+        ax4.axhline(50, color="#888888", linewidth=0.6, linestyle=":")
+        ax4.axhline(20, color="#26a69a", linewidth=0.8, linestyle="--", alpha=0.7)
+        ax4.set_ylim(0, 100)
+        ax4.set_yticks([20, 50, 80])
+        ax4.set_yticklabels(["20", "50", "80"], color="gray", fontsize=7)
+
+        last_sk = next((v for v in reversed(sk_vals) if _valid(v)), None)
+        last_sd = next((v for v in reversed(sd_vals) if _valid(v)), None)
+        stoch_status = (f"  ·  %K={last_sk:.1f}  %D={last_sd:.1f}"
+                        if last_sk is not None and last_sd is not None else "")
+        stoch_zone = (" — Overbought" if last_sk and last_sk > 80
+                      else " — Oversold" if last_sk and last_sk < 20 else "")
+        ax4.set_title(f"Stochastic (14, 3){stoch_status}{stoch_zone}",
+                      color="white", fontsize=10, pad=6)
+        ax4.legend(fontsize=6, loc="upper left", facecolor="#161b22",
+                   edgecolor="#30363d", labelcolor="white", framealpha=0.8)
+    else:
+        ax4.text(0.5, 0.5, "Stochastic unavailable", ha="center", va="center",
+                 color="gray", transform=ax4.transAxes)
+        ax4.set_title("Stochastic (14, 3)", color="white", fontsize=10, pad=6)
+
+    ax4.tick_params(colors="gray", labelsize=7)
+    for spine in ax4.spines.values():
+        spine.set_edgecolor("#30363d")
+
+    # ── Panel 5: Confidence + Risk gauge ──────────────────────────────────
+    ax5 = fig.add_subplot(gs[3, 0])
+    ax5.set_facecolor("#161b22")
+    ax5.set_xlim(0, 1)
+    ax5.set_ylim(0, 1)
+    ax5.axis("off")
 
     theta = np.linspace(np.pi, np.pi * (1 - confidence), 100)
-    ax3.plot(
+    ax5.plot(
         0.3 + 0.22 * np.cos(np.linspace(np.pi, 0, 100)),
         0.55 + 0.22 * np.sin(np.linspace(np.pi, 0, 100)),
         color="#30363d", linewidth=10, solid_capstyle="round",
     )
-    ax3.plot(
+    ax5.plot(
         0.3 + 0.22 * np.cos(theta),
         0.55 + 0.22 * np.sin(theta),
         color=main_color, linewidth=10, solid_capstyle="round",
     )
-    ax3.text(0.3, 0.50, f"{int(confidence * 100)}%", ha="center", va="center",
+    ax5.text(0.3, 0.50, f"{int(confidence * 100)}%", ha="center", va="center",
              color="white", fontsize=18, fontweight="bold")
-    ax3.text(0.3, 0.20, "Confidence", ha="center", color="gray", fontsize=9)
+    ax5.text(0.3, 0.20, "Confidence", ha="center", color="gray", fontsize=9)
 
     risk_color = risk_colors[risk]
     pill = mpatches.FancyBboxPatch(
         (0.60, 0.42), 0.30, 0.18,
         boxstyle="round,pad=0.02", facecolor=risk_color, edgecolor="none", alpha=0.25,
     )
-    ax3.add_patch(pill)
-    ax3.text(0.75, 0.51, f"Risk: {risk.upper()}", ha="center", va="center",
+    ax5.add_patch(pill)
+    ax5.text(0.75, 0.51, f"Risk: {risk.upper()}", ha="center", va="center",
              color=risk_color, fontsize=10, fontweight="bold")
     direction_icon = {"bullish": "▲ BULLISH", "bearish": "▼ BEARISH", "neutral": "◆ NEUTRAL"}[direction]
-    ax3.text(0.75, 0.28, direction_icon, ha="center", color=main_color,
+    ax5.text(0.75, 0.28, direction_icon, ha="center", color=main_color,
              fontsize=11, fontweight="bold")
-    ax3.set_title("Confidence & Risk", color="white", fontsize=10, pad=6)
+    ax5.set_title("Confidence & Risk", color="white", fontsize=10, pad=6)
 
-    # ── Panel 4: Technical signal factors ─────────────────────────────────
-    ax4 = fig.add_subplot(gs[2, 1])
-    ax4.set_facecolor("#161b22")
+    # ── Panel 6: Technical signal factors ─────────────────────────────────
+    ax6 = fig.add_subplot(gs[3, 1])
+    ax6.set_facecolor("#161b22")
     if factors:
         y_pos = range(len(factors))
         weights = [random.uniform(0.6, 1.0) for _ in factors]
-        ax4.barh(list(y_pos), weights, color=main_color, alpha=0.8,
+        ax6.barh(list(y_pos), weights, color=main_color, alpha=0.8,
                  edgecolor="#30363d", height=0.5)
-        ax4.set_yticks(list(y_pos))
-        ax4.set_yticklabels(
+        ax6.set_yticks(list(y_pos))
+        ax6.set_yticklabels(
             [f[:30] + "…" if len(f) > 30 else f for f in factors],
             color="white", fontsize=7,
         )
-        ax4.set_xlim(0, 1.2)
-        ax4.set_xticks([0, 0.5, 1.0])
-        ax4.set_xticklabels(["Low", "Med", "High"], color="gray", fontsize=7)
+        ax6.set_xlim(0, 1.2)
+        ax6.set_xticks([0, 0.5, 1.0])
+        ax6.set_xticklabels(["Low", "Med", "High"], color="gray", fontsize=7)
     else:
-        ax4.text(0.5, 0.5, "No signals", ha="center", va="center",
-                 color="gray", transform=ax4.transAxes)
-    ax4.set_title("Technical Signal Factors", color="white", fontsize=10, pad=6)
-    ax4.tick_params(colors="gray")
-    for spine in ax4.spines.values():
+        ax6.text(0.5, 0.5, "No signals", ha="center", va="center",
+                 color="gray", transform=ax6.transAxes)
+    ax6.set_title("Technical Signal Factors", color="white", fontsize=10, pad=6)
+    ax6.tick_params(colors="gray")
+    for spine in ax6.spines.values():
         spine.set_edgecolor("#30363d")
 
     chart_path = os.path.join(charts_dir, f"{ticker}_{timeframe}.png")

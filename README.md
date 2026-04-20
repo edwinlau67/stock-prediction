@@ -125,13 +125,16 @@ The `predictions.md` file contains a full analysis per ticker including a summar
 
 ### Analysis charts
 
-Each PNG chart contains 3 panels:
+Each PNG chart contains 6 panels across 4 rows:
 
 | Panel | Description |
 |-------|-------------|
 | **Price + SMA50/200/EMA20 + Target** | 6-month daily price with SMA50 (amber), SMA200 (purple), EMA20 (blue dashed), Golden/Death Cross marker, and projected target |
 | **MACD (12, 26, 9)** | Histogram (green/red bars), MACD line, and signal line with current crossover status in the title |
-| **Confidence & Risk / Signal Factors** | Arc gauge for confidence %, risk level pill, direction label, and horizontal bar chart of the technical signals that drove the prediction |
+| **RSI (14)** | RSI line with overbought (>70) and oversold (<30) fill zones; current value and zone label in title |
+| **Stochastic (14, 3)** | %K (fast) and %D (signal) lines with overbought (>80) and oversold (<20) fill zones; current values in title |
+| **Confidence & Risk** | Arc gauge showing confidence %, risk pill, and direction label |
+| **Technical Signal Factors** | Horizontal bar chart of the indicator signals that drove the prediction direction |
 
 ## Technical Indicators
 
@@ -147,6 +150,8 @@ The prediction engine computes these trend-following indicators on 1 year of dai
 | **MACD (12, 26, 9)** | MACD line (EMA12 − EMA26), signal line (EMA9 of MACD), histogram |
 | **MACD crossover** | MACD line crossing above/below signal line (+2 pts) |
 | **Price vs SMA50/200** | Whether price trades above or below each MA (+1 pt each) |
+| **RSI (14)** | <30 oversold = bullish (+2 pts), >70 overbought = bearish (+2 pts), above/below 50 midline (+1 pt) |
+| **Stochastic (14, 3)** | %K/%D crossover (+1 pt); %K <20 oversold = bullish (+1 pt), >80 overbought = bearish (+1 pt) |
 
 Direction (`bullish` / `bearish` / `neutral`) and confidence are derived by scoring these signals — no random guessing.
 
