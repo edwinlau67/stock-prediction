@@ -295,7 +295,10 @@ def get_technical_indicators(ticker: str) -> dict:
     }
 
 
-def run_prediction(ticker: str, timeframe: str = "1w") -> dict:
+def run_prediction(ticker: str, timeframe: str = "1w", indicators: set | None = None) -> dict:
+    if indicators is None:
+        indicators = {"trend", "momentum", "volatility", "volume", "support"}
+
     base_price = get_current_price(ticker)
 
     try:
@@ -313,126 +316,131 @@ def run_prediction(ticker: str, timeframe: str = "1w") -> dict:
         last_macd = next((v for v in reversed(tech["macd_line"]) if _valid(v)), None)
         last_signal = next((v for v in reversed(tech["signal_line"]) if _valid(v)), None)
 
-        # Golden / Death Cross
-        if tech["cross_signal"] == "golden":
-            bullish_score += 2
-            key_factors.append("Golden Cross: SMA50 crossed above SMA200")
-        elif tech["cross_signal"] == "death":
-            bearish_score += 2
-            key_factors.append("Death Cross: SMA50 crossed below SMA200")
-
-        # MACD crossover signal
-        if tech["macd_crossover"] == "bullish":
-            bullish_score += 2
-            key_factors.append("MACD bullish crossover — momentum building")
-        elif tech["macd_crossover"] == "bearish":
-            bearish_score += 2
-            key_factors.append("MACD bearish crossover — momentum weakening")
-
-        # Current MACD vs signal line
-        if last_macd is not None and last_signal is not None:
-            if last_macd > last_signal:
-                bullish_score += 1
-                key_factors.append(f"MACD ({last_macd:.3f}) above signal ({last_signal:.3f})")
-            else:
-                bearish_score += 1
-                key_factors.append(f"MACD ({last_macd:.3f}) below signal ({last_signal:.3f})")
-
-        # Price vs SMA50 / SMA200
-        if last_sma50:
-            if base_price > last_sma50:
-                bullish_score += 1
-                key_factors.append(f"Price above SMA50 (${last_sma50:.2f})")
-            else:
-                bearish_score += 1
-                key_factors.append(f"Price below SMA50 (${last_sma50:.2f})")
-        if last_sma200:
-            if base_price > last_sma200:
-                bullish_score += 1
-                key_factors.append(f"Price above SMA200 (${last_sma200:.2f})")
-            else:
-                bearish_score += 1
-                key_factors.append(f"Price below SMA200 (${last_sma200:.2f})")
-
-        # RSI (14-period)
-        last_rsi = next((v for v in reversed(tech["rsi"]) if _valid(v)), None)
-        if last_rsi is not None:
-            if last_rsi < 30:
+        if "trend" in indicators:
+            # Golden / Death Cross
+            if tech["cross_signal"] == "golden":
                 bullish_score += 2
-                key_factors.append(f"RSI oversold ({last_rsi:.1f}) — potential reversal up")
-            elif last_rsi > 70:
+                key_factors.append("Golden Cross: SMA50 crossed above SMA200")
+            elif tech["cross_signal"] == "death":
                 bearish_score += 2
-                key_factors.append(f"RSI overbought ({last_rsi:.1f}) — potential reversal down")
-            elif last_rsi >= 50:
+                key_factors.append("Death Cross: SMA50 crossed below SMA200")
+
+            # MACD crossover signal
+            if tech["macd_crossover"] == "bullish":
+                bullish_score += 2
+                key_factors.append("MACD bullish crossover — momentum building")
+            elif tech["macd_crossover"] == "bearish":
+                bearish_score += 2
+                key_factors.append("MACD bearish crossover — momentum weakening")
+
+            # Current MACD vs signal line
+            if last_macd is not None and last_signal is not None:
+                if last_macd > last_signal:
+                    bullish_score += 1
+                    key_factors.append(f"MACD ({last_macd:.3f}) above signal ({last_signal:.3f})")
+                else:
+                    bearish_score += 1
+                    key_factors.append(f"MACD ({last_macd:.3f}) below signal ({last_signal:.3f})")
+
+            # Price vs SMA50 / SMA200
+            if last_sma50:
+                if base_price > last_sma50:
+                    bullish_score += 1
+                    key_factors.append(f"Price above SMA50 (${last_sma50:.2f})")
+                else:
+                    bearish_score += 1
+                    key_factors.append(f"Price below SMA50 (${last_sma50:.2f})")
+            if last_sma200:
+                if base_price > last_sma200:
+                    bullish_score += 1
+                    key_factors.append(f"Price above SMA200 (${last_sma200:.2f})")
+                else:
+                    bearish_score += 1
+                    key_factors.append(f"Price below SMA200 (${last_sma200:.2f})")
+
+        if "momentum" in indicators:
+            # RSI (14-period)
+            last_rsi = next((v for v in reversed(tech["rsi"]) if _valid(v)), None)
+            if last_rsi is not None:
+                if last_rsi < 30:
+                    bullish_score += 2
+                    key_factors.append(f"RSI oversold ({last_rsi:.1f}) — potential reversal up")
+                elif last_rsi > 70:
+                    bearish_score += 2
+                    key_factors.append(f"RSI overbought ({last_rsi:.1f}) — potential reversal down")
+                elif last_rsi >= 50:
+                    bullish_score += 1
+                    key_factors.append(f"RSI bullish momentum ({last_rsi:.1f})")
+                else:
+                    bearish_score += 1
+                    key_factors.append(f"RSI bearish momentum ({last_rsi:.1f})")
+
+            # Stochastic Oscillator
+            last_stoch_k = next((v for v in reversed(tech["stoch_k"]) if _valid(v)), None)
+            if tech["stoch_crossover"] == "bullish":
                 bullish_score += 1
-                key_factors.append(f"RSI bullish momentum ({last_rsi:.1f})")
+                key_factors.append("Stochastic %K crossed above %D (bullish)")
+            elif tech["stoch_crossover"] == "bearish":
+                bearish_score += 1
+                key_factors.append("Stochastic %K crossed below %D (bearish)")
+            if last_stoch_k is not None:
+                if last_stoch_k < 20:
+                    bullish_score += 1
+                    key_factors.append(f"Stochastic oversold (%K={last_stoch_k:.1f})")
+                elif last_stoch_k > 80:
+                    bearish_score += 1
+                    key_factors.append(f"Stochastic overbought (%K={last_stoch_k:.1f})")
+
+        if "volume" in indicators:
+            # OBV trend
+            if tech["obv_trend"] == "rising":
+                bullish_score += 1
+                key_factors.append("OBV rising — volume confirms buying pressure")
+            elif tech["obv_trend"] == "falling":
+                bearish_score += 1
+                key_factors.append("OBV falling — volume confirms selling pressure")
+
+            # Volume spike direction
+            if tech["spike_signal"] == "bullish":
+                bullish_score += 1
+                key_factors.append("Volume spike on up day — strong buying interest")
+            elif tech["spike_signal"] == "bearish":
+                bearish_score += 1
+                key_factors.append("Volume spike on down day — strong selling pressure")
+
+        if "support" in indicators:
+            # Trendlines
+            if tech.get("trendline_signal") == "above_support":
+                sl_data = tech.get("support_line", {})
+                if sl_data and sl_data.get("slope", 0) > 0:
+                    bullish_score += 1
+                    key_factors.append("Price above rising support trendline")
+                else:
+                    key_factors.append("Price above support trendline")
+            elif tech.get("trendline_signal") == "below_support":
+                bearish_score += 1
+                key_factors.append("Price broke below support trendline")
+
+            # Pivot Points
+            pp_val = tech["pivot_points"]["PP"]
+            if base_price > pp_val:
+                bullish_score += 1
+                key_factors.append(f"Price above Pivot Point (${pp_val:.2f})")
             else:
                 bearish_score += 1
-                key_factors.append(f"RSI bearish momentum ({last_rsi:.1f})")
+                key_factors.append(f"Price below Pivot Point (${pp_val:.2f})")
 
-        # Stochastic Oscillator
-        last_stoch_k = next((v for v in reversed(tech["stoch_k"]) if _valid(v)), None)
-        if tech["stoch_crossover"] == "bullish":
-            bullish_score += 1
-            key_factors.append("Stochastic %K crossed above %D (bullish)")
-        elif tech["stoch_crossover"] == "bearish":
-            bearish_score += 1
-            key_factors.append("Stochastic %K crossed below %D (bearish)")
-        if last_stoch_k is not None:
-            if last_stoch_k < 20:
-                bullish_score += 1
-                key_factors.append(f"Stochastic oversold (%K={last_stoch_k:.1f})")
-            elif last_stoch_k > 80:
+        if "volatility" in indicators:
+            # Bollinger Bands position
+            bb_sig = tech.get("bb_signal")
+            last_bb_upper = next((v for v in reversed(tech["bb_upper"]) if _valid(v)), None)
+            last_bb_lower = next((v for v in reversed(tech["bb_lower"]) if _valid(v)), None)
+            if bb_sig == "above_upper" and last_bb_upper:
                 bearish_score += 1
-                key_factors.append(f"Stochastic overbought (%K={last_stoch_k:.1f})")
-
-        # OBV trend
-        if tech["obv_trend"] == "rising":
-            bullish_score += 1
-            key_factors.append("OBV rising — volume confirms buying pressure")
-        elif tech["obv_trend"] == "falling":
-            bearish_score += 1
-            key_factors.append("OBV falling — volume confirms selling pressure")
-
-        # Volume spike direction
-        if tech["spike_signal"] == "bullish":
-            bullish_score += 1
-            key_factors.append("Volume spike on up day — strong buying interest")
-        elif tech["spike_signal"] == "bearish":
-            bearish_score += 1
-            key_factors.append("Volume spike on down day — strong selling pressure")
-
-        # Trendlines
-        if tech.get("trendline_signal") == "above_support":
-            sl_data = tech.get("support_line", {})
-            if sl_data and sl_data.get("slope", 0) > 0:
+                key_factors.append(f"Price above upper BB (${last_bb_upper:.2f}) — overbought")
+            elif bb_sig == "below_lower" and last_bb_lower:
                 bullish_score += 1
-                key_factors.append("Price above rising support trendline")
-            else:
-                key_factors.append("Price above support trendline")
-        elif tech.get("trendline_signal") == "below_support":
-            bearish_score += 1
-            key_factors.append("Price broke below support trendline")
-
-        # Pivot Points
-        pp_val = tech["pivot_points"]["PP"]
-        if base_price > pp_val:
-            bullish_score += 1
-            key_factors.append(f"Price above Pivot Point (${pp_val:.2f})")
-        else:
-            bearish_score += 1
-            key_factors.append(f"Price below Pivot Point (${pp_val:.2f})")
-
-        # Bollinger Bands position
-        bb_sig = tech.get("bb_signal")
-        last_bb_upper = next((v for v in reversed(tech["bb_upper"]) if _valid(v)), None)
-        last_bb_lower = next((v for v in reversed(tech["bb_lower"]) if _valid(v)), None)
-        if bb_sig == "above_upper" and last_bb_upper:
-            bearish_score += 1
-            key_factors.append(f"Price above upper BB (${last_bb_upper:.2f}) — overbought")
-        elif bb_sig == "below_lower" and last_bb_lower:
-            bullish_score += 1
-            key_factors.append(f"Price below lower BB (${last_bb_lower:.2f}) — oversold")
+                key_factors.append(f"Price below lower BB (${last_bb_lower:.2f}) — oversold")
 
     if bullish_score > bearish_score:
         direction = "bullish"
@@ -477,6 +485,7 @@ def run_prediction(ticker: str, timeframe: str = "1w") -> dict:
         "key_factors": key_factors[:6],
         "risk_level": risk_level,
         "technical": tech,
+        "indicators": sorted(indicators),
     }
 
 
@@ -491,12 +500,25 @@ def generate_chart(prediction: dict, charts_dir: str) -> str:
     risk = prediction["risk_level"]
     timeframe = prediction["timeframe"]
     tech = prediction.get("technical") or {}
+    active = set(prediction.get("indicators", ["trend", "momentum", "volatility", "volume", "support"]))
 
     color_map = {"bullish": "#26a69a", "bearish": "#ef5350", "neutral": "#ffa726"}
     risk_colors = {"low": "#26a69a", "medium": "#ffa726", "high": "#ef5350"}
     main_color = color_map[direction]
 
-    fig = plt.figure(figsize=(14, 24), facecolor="#0d1117")
+    # Build rows dynamically from selected indicators (in display order)
+    _PANEL_ORDER = [
+        ("trend",      "full",  1.2),
+        ("momentum",   "split", 1.2),
+        ("volume",     "split", 1.2),
+        ("support",    "full",  1.2),
+        ("volatility", "full",  2.0),
+    ]
+    optional = [(cat, layout, h) for cat, layout, h in _PANEL_ORDER if cat in active]
+    height_ratios = [2.5] + [h for _, _, h in optional] + [1.2]
+    fig_height = round(sum(height_ratios) * (24 / 11.5), 1)
+
+    fig = plt.figure(figsize=(14, fig_height), facecolor="#0d1117")
     change_pct = (target - current) / current * 100
     sign = "+" if change_pct >= 0 else ""
     fig.suptitle(
@@ -504,8 +526,8 @@ def generate_chart(prediction: dict, charts_dir: str) -> str:
         fontsize=15, fontweight="bold", color="white", y=0.99,
     )
     gs = gridspec.GridSpec(
-        7, 2, figure=fig,
-        height_ratios=[2.5, 1.2, 1.2, 1.2, 1.2, 2.0, 1.2],
+        len(height_ratios), 2, figure=fig,
+        height_ratios=height_ratios,
         hspace=0.55, wspace=0.35,
     )
 
@@ -527,69 +549,73 @@ def generate_chart(prediction: dict, charts_dir: str) -> str:
         ax1.plot(xs, closes, color=main_color, linewidth=1.8, label="Price", zorder=3)
         ax1.fill_between(xs, closes, alpha=0.10, color=main_color)
 
-        v50 = [(xs[i], sma50[i]) for i in range(len(sma50)) if _valid(sma50[i])]
-        if v50:
-            ax1.plot([p[0] for p in v50], [p[1] for p in v50],
-                     color="#f0b429", linewidth=1.4, alpha=0.9, label="SMA50")
+        if "trend" in active:
+            v50 = [(xs[i], sma50[i]) for i in range(len(sma50)) if _valid(sma50[i])]
+            if v50:
+                ax1.plot([p[0] for p in v50], [p[1] for p in v50],
+                         color="#f0b429", linewidth=1.4, alpha=0.9, label="SMA50")
 
-        v200 = [(xs[i], sma200[i]) for i in range(len(sma200)) if _valid(sma200[i])]
-        if v200:
-            ax1.plot([p[0] for p in v200], [p[1] for p in v200],
-                     color="#a78bfa", linewidth=1.4, alpha=0.9, label="SMA200")
+            v200 = [(xs[i], sma200[i]) for i in range(len(sma200)) if _valid(sma200[i])]
+            if v200:
+                ax1.plot([p[0] for p in v200], [p[1] for p in v200],
+                         color="#a78bfa", linewidth=1.4, alpha=0.9, label="SMA200")
 
-        ve20 = [(xs[i], ema20[i]) for i in range(len(ema20)) if _valid(ema20[i])]
-        if ve20:
-            ax1.plot([p[0] for p in ve20], [p[1] for p in ve20],
-                     color="#38bdf8", linewidth=1.1, linestyle="--", alpha=0.85, label="EMA20")
+            ve20 = [(xs[i], ema20[i]) for i in range(len(ema20)) if _valid(ema20[i])]
+            if ve20:
+                ax1.plot([p[0] for p in ve20], [p[1] for p in ve20],
+                         color="#38bdf8", linewidth=1.1, linestyle="--", alpha=0.85, label="EMA20")
 
-        # Bollinger Bands overlay
-        bbu = tech["bb_upper"][-display_n:]
-        bbl = tech["bb_lower"][-display_n:]
-        bb_idx = [i for i in range(len(bbu)) if _valid(bbu[i]) and _valid(bbl[i])]
-        if bb_idx:
-            bx  = [xs[i] for i in bb_idx]
-            buy = [bbu[i] for i in bb_idx]
-            bly = [bbl[i] for i in bb_idx]
-            ax1.plot(bx, buy, color="#e879f9", linewidth=0.9,
-                     linestyle=":", alpha=0.8, label="BB Upper")
-            ax1.plot(bx, bly, color="#e879f9", linewidth=0.9,
-                     linestyle=":", alpha=0.8, label="BB Lower")
-            ax1.fill_between(bx, buy, bly, alpha=0.05, color="#e879f9")
+        if "volatility" in active:
+            # Bollinger Bands overlay
+            bbu = tech["bb_upper"][-display_n:]
+            bbl = tech["bb_lower"][-display_n:]
+            bb_idx = [i for i in range(len(bbu)) if _valid(bbu[i]) and _valid(bbl[i])]
+            if bb_idx:
+                bx  = [xs[i] for i in bb_idx]
+                buy = [bbu[i] for i in bb_idx]
+                bly = [bbl[i] for i in bb_idx]
+                ax1.plot(bx, buy, color="#e879f9", linewidth=0.9,
+                         linestyle=":", alpha=0.8, label="BB Upper")
+                ax1.plot(bx, bly, color="#e879f9", linewidth=0.9,
+                         linestyle=":", alpha=0.8, label="BB Lower")
+                ax1.fill_between(bx, buy, bly, alpha=0.05, color="#e879f9")
 
         last_x = xs[-1]
         proj_len = max(4, display_n // 8)
 
-        # Trendline overlays (support = cyan dash-dot, resistance = pink dash-dot)
-        for tl_key, tl_color, tl_label in [
-            ("support_line",    "#22d3ee", "Support TL"),
-            ("resistance_line", "#f472b6", "Resistance TL"),
-        ]:
-            tl = tech.get(tl_key)
-            if tl:
-                n_all_tl = tech["n_bars"]
-                x2d = tl["x2"] - (n_all_tl - display_n)
-                if x2d >= 0:
-                    x_ext = last_x + proj_len
-                    x1d = max(tl["x1"] - (n_all_tl - display_n), 0)
-                    tl_xs = [x1d, x_ext]
-                    tl_ys = [
-                        tl["y2"] + tl["slope"] * (x1d - x2d),
-                        tl["y2"] + tl["slope"] * (x_ext - x2d),
-                    ]
-                    ax1.plot(tl_xs, tl_ys, color=tl_color, linewidth=1.1,
-                             linestyle="-.", alpha=0.85, label=tl_label)
+        if "support" in active:
+            # Trendline overlays (support = cyan dash-dot, resistance = pink dash-dot)
+            for tl_key, tl_color, tl_label in [
+                ("support_line",    "#22d3ee", "Support TL"),
+                ("resistance_line", "#f472b6", "Resistance TL"),
+            ]:
+                tl = tech.get(tl_key)
+                if tl:
+                    n_all_tl = tech["n_bars"]
+                    x2d = tl["x2"] - (n_all_tl - display_n)
+                    if x2d >= 0:
+                        x_ext = last_x + proj_len
+                        x1d = max(tl["x1"] - (n_all_tl - display_n), 0)
+                        tl_xs = [x1d, x_ext]
+                        tl_ys = [
+                            tl["y2"] + tl["slope"] * (x1d - x2d),
+                            tl["y2"] + tl["slope"] * (x_ext - x2d),
+                        ]
+                        ax1.plot(tl_xs, tl_ys, color=tl_color, linewidth=1.1,
+                                 linestyle="-.", alpha=0.85, label=tl_label)
 
-        # Golden / Death Cross marker (only if within display window)
-        cross_idx = tech.get("cross_idx")
-        if cross_idx is not None:
-            disp_idx = cross_idx - offset
-            if 0 <= disp_idx < display_n:
-                cx_y = closes[disp_idx]
-                is_golden = tech["cross_signal"] == "golden"
-                cx_color = "#ffd700" if is_golden else "#ff4444"
-                cx_label = "Golden Cross ★" if is_golden else "Death Cross ✕"
-                ax1.scatter([disp_idx], [cx_y], color=cx_color, s=180, zorder=6,
-                            marker="*" if is_golden else "X", label=cx_label)
+        if "trend" in active:
+            # Golden / Death Cross marker (only if within display window)
+            cross_idx = tech.get("cross_idx")
+            if cross_idx is not None:
+                disp_idx = cross_idx - offset
+                if 0 <= disp_idx < display_n:
+                    cx_y = closes[disp_idx]
+                    is_golden = tech["cross_signal"] == "golden"
+                    cx_color = "#ffd700" if is_golden else "#ff4444"
+                    cx_label = "Golden Cross ★" if is_golden else "Death Cross ✕"
+                    ax1.scatter([disp_idx], [cx_y], color=cx_color, s=180, zorder=6,
+                                marker="*" if is_golden else "X", label=cx_label)
 
         # Target projection arrow
         proj_x = [last_x, last_x + proj_len]
@@ -611,377 +637,338 @@ def generate_chart(prediction: dict, charts_dir: str) -> str:
     for spine in ax1.spines.values():
         spine.set_edgecolor("#30363d")
 
-    # ── Panel 2: MACD (12, 26, 9) — full width ────────────────────────────
-    ax2 = fig.add_subplot(gs[1, :])
-    ax2.set_facecolor("#161b22")
+    row = 1
+    for _cat, _, _ in optional:
 
-    if tech:
-        n_all = len(tech["xs"])
-        display_n = min(126, n_all)
-        xs_m = list(range(display_n))
-        ml = tech["macd_line"][-display_n:]
-        sl = tech["signal_line"][-display_n:]
-        hl = tech["histogram"][-display_n:]
-
-        # Histogram bars (green = positive, red = negative)
-        valid_hi = [(xs_m[i], hl[i]) for i in range(len(hl)) if _valid(hl[i])]
-        if valid_hi:
-            bar_xs = [p[0] for p in valid_hi]
-            bar_ys = [p[1] for p in valid_hi]
-            bar_colors = ["#26a69a" if v >= 0 else "#ef5350" for v in bar_ys]
-            ax2.bar(bar_xs, bar_ys, color=bar_colors, alpha=0.5, width=1.0, label="Histogram")
-
-        valid_ml = [(xs_m[i], ml[i]) for i in range(len(ml)) if _valid(ml[i])]
-        if valid_ml:
-            ax2.plot([p[0] for p in valid_ml], [p[1] for p in valid_ml],
-                     color="#38bdf8", linewidth=1.5, label="MACD (12−26)")
-
-        valid_sl = [(xs_m[i], sl[i]) for i in range(len(sl)) if _valid(sl[i])]
-        if valid_sl:
-            ax2.plot([p[0] for p in valid_sl], [p[1] for p in valid_sl],
-                     color="#ffa726", linewidth=1.2, label="Signal (9)")
-
-        ax2.axhline(0, color="#30363d", linewidth=0.8)
-
-        last_m = next((v for v in reversed(ml) if _valid(v)), None)
-        last_s = next((v for v in reversed(sl) if _valid(v)), None)
-        if last_m is not None and last_s is not None:
-            trend = "▲ Bullish" if last_m > last_s else "▼ Bearish"
-            status = f"{trend}   MACD {last_m:+.3f}   Signal {last_s:+.3f}"
-        else:
-            status = ""
-        ax2.set_title(f"MACD (12, 26, 9)   {status}", color="white", fontsize=10, pad=6)
-        ax2.legend(fontsize=7, loc="upper left", facecolor="#161b22",
-                   edgecolor="#30363d", labelcolor="white", framealpha=0.8)
-    else:
-        ax2.text(0.5, 0.5, "MACD unavailable", ha="center", va="center",
-                 color="gray", transform=ax2.transAxes)
-        ax2.set_title("MACD (12, 26, 9)", color="white", fontsize=10, pad=6)
-
-    ax2.tick_params(colors="gray", labelsize=7)
-    for spine in ax2.spines.values():
-        spine.set_edgecolor("#30363d")
-
-    # ── Panel 3: RSI (14) ─────────────────────────────────────────────────
-    ax3 = fig.add_subplot(gs[2, 0])
-    ax3.set_facecolor("#161b22")
-
-    if tech:
-        n_all = len(tech["xs"])
-        display_n = min(126, n_all)
-        xs_r = list(range(display_n))
-        rsi_vals = tech["rsi"][-display_n:]
-
-        valid_rsi = [(xs_r[i], rsi_vals[i]) for i in range(len(rsi_vals)) if _valid(rsi_vals[i])]
-        if valid_rsi:
-            rx = [p[0] for p in valid_rsi]
-            ry = [p[1] for p in valid_rsi]
-            ax3.plot(rx, ry, color="#38bdf8", linewidth=1.4, label="RSI (14)")
-            ax3.fill_between(rx, ry, 70, where=[v > 70 for v in ry],
-                             color="#ef5350", alpha=0.25, label="Overbought")
-            ax3.fill_between(rx, ry, 30, where=[v < 30 for v in ry],
-                             color="#26a69a", alpha=0.25, label="Oversold")
-
-        ax3.axhline(70, color="#ef5350", linewidth=0.8, linestyle="--", alpha=0.7)
-        ax3.axhline(50, color="#888888", linewidth=0.6, linestyle=":")
-        ax3.axhline(30, color="#26a69a", linewidth=0.8, linestyle="--", alpha=0.7)
-        ax3.set_ylim(0, 100)
-        ax3.set_yticks([30, 50, 70])
-        ax3.set_yticklabels(["30", "50", "70"], color="gray", fontsize=7)
-
-        last_rsi = next((v for v in reversed(rsi_vals) if _valid(v)), None)
-        rsi_status = f"  ·  {last_rsi:.1f}" if last_rsi is not None else ""
-        rsi_label = (" — Overbought" if last_rsi and last_rsi > 70
-                     else " — Oversold" if last_rsi and last_rsi < 30 else "")
-        ax3.set_title(f"RSI (14){rsi_status}{rsi_label}", color="white", fontsize=10, pad=6)
-        ax3.legend(fontsize=6, loc="upper left", facecolor="#161b22",
-                   edgecolor="#30363d", labelcolor="white", framealpha=0.8)
-    else:
-        ax3.text(0.5, 0.5, "RSI unavailable", ha="center", va="center",
-                 color="gray", transform=ax3.transAxes)
-        ax3.set_title("RSI (14)", color="white", fontsize=10, pad=6)
-
-    ax3.tick_params(colors="gray", labelsize=7)
-    for spine in ax3.spines.values():
-        spine.set_edgecolor("#30363d")
-
-    # ── Panel 4: Stochastic Oscillator (%K 14, %D 3) ─────────────────────
-    ax4 = fig.add_subplot(gs[2, 1])
-    ax4.set_facecolor("#161b22")
-
-    if tech:
-        n_all = len(tech["xs"])
-        display_n = min(126, n_all)
-        xs_s = list(range(display_n))
-        sk_vals = tech["stoch_k"][-display_n:]
-        sd_vals = tech["stoch_d"][-display_n:]
-
-        valid_sk = [(xs_s[i], sk_vals[i]) for i in range(len(sk_vals)) if _valid(sk_vals[i])]
-        valid_sd = [(xs_s[i], sd_vals[i]) for i in range(len(sd_vals)) if _valid(sd_vals[i])]
-
-        if valid_sk:
-            skx = [p[0] for p in valid_sk]
-            sky = [p[1] for p in valid_sk]
-            ax4.plot(skx, sky, color="#a78bfa", linewidth=1.4, label="%K (14)")
-            ax4.fill_between(skx, sky, 80, where=[v > 80 for v in sky],
-                             color="#ef5350", alpha=0.20)
-            ax4.fill_between(skx, sky, 20, where=[v < 20 for v in sky],
-                             color="#26a69a", alpha=0.20)
-        if valid_sd:
-            ax4.plot([p[0] for p in valid_sd], [p[1] for p in valid_sd],
-                     color="#ffa726", linewidth=1.1, linestyle="--", label="%D (3)")
-
-        ax4.axhline(80, color="#ef5350", linewidth=0.8, linestyle="--", alpha=0.7)
-        ax4.axhline(50, color="#888888", linewidth=0.6, linestyle=":")
-        ax4.axhline(20, color="#26a69a", linewidth=0.8, linestyle="--", alpha=0.7)
-        ax4.set_ylim(0, 100)
-        ax4.set_yticks([20, 50, 80])
-        ax4.set_yticklabels(["20", "50", "80"], color="gray", fontsize=7)
-
-        last_sk = next((v for v in reversed(sk_vals) if _valid(v)), None)
-        last_sd = next((v for v in reversed(sd_vals) if _valid(v)), None)
-        stoch_status = (f"  ·  %K={last_sk:.1f}  %D={last_sd:.1f}"
-                        if last_sk is not None and last_sd is not None else "")
-        stoch_zone = (" — Overbought" if last_sk and last_sk > 80
-                      else " — Oversold" if last_sk and last_sk < 20 else "")
-        ax4.set_title(f"Stochastic (14, 3){stoch_status}{stoch_zone}",
-                      color="white", fontsize=10, pad=6)
-        ax4.legend(fontsize=6, loc="upper left", facecolor="#161b22",
-                   edgecolor="#30363d", labelcolor="white", framealpha=0.8)
-    else:
-        ax4.text(0.5, 0.5, "Stochastic unavailable", ha="center", va="center",
-                 color="gray", transform=ax4.transAxes)
-        ax4.set_title("Stochastic (14, 3)", color="white", fontsize=10, pad=6)
-
-    ax4.tick_params(colors="gray", labelsize=7)
-    for spine in ax4.spines.values():
-        spine.set_edgecolor("#30363d")
-
-    # ── Panel 5: Volume + Spike markers ───────────────────────────────────
-    ax5 = fig.add_subplot(gs[3, 0])
-    ax5.set_facecolor("#161b22")
-
-    if tech:
-        n_all = len(tech["xs"])
-        display_n = min(126, n_all)
-        xs_v = list(range(display_n))
-        vol_vals  = tech["volume"][-display_n:]
-        vm_vals   = tech["vol_mean"][-display_n:]
-        spk_vals  = tech["vol_spike"][-display_n:]
-        cl_vals   = tech["closes"][-display_n:]
-        prev_cl   = tech["closes"][-(display_n + 1):-1]
-
-        bar_colors = []
-        for i in range(len(vol_vals)):
-            if i == 0 or not _valid(cl_vals[i]) or not _valid(prev_cl[i]):
-                bar_colors.append("#888888")
-            elif cl_vals[i] >= prev_cl[i]:
-                bar_colors.append("#26a69a")
+        if _cat == "trend":
+            # ── MACD (12, 26, 9) ──────────────────────────────────────────
+            ax2 = fig.add_subplot(gs[row, :])
+            ax2.set_facecolor("#161b22")
+            if tech:
+                n_all = len(tech["xs"])
+                display_n = min(126, n_all)
+                xs_m = list(range(display_n))
+                ml = tech["macd_line"][-display_n:]
+                sl = tech["signal_line"][-display_n:]
+                hl = tech["histogram"][-display_n:]
+                valid_hi = [(xs_m[i], hl[i]) for i in range(len(hl)) if _valid(hl[i])]
+                if valid_hi:
+                    bar_xs = [p[0] for p in valid_hi]
+                    bar_ys = [p[1] for p in valid_hi]
+                    bar_colors = ["#26a69a" if v >= 0 else "#ef5350" for v in bar_ys]
+                    ax2.bar(bar_xs, bar_ys, color=bar_colors, alpha=0.5, width=1.0, label="Histogram")
+                valid_ml = [(xs_m[i], ml[i]) for i in range(len(ml)) if _valid(ml[i])]
+                if valid_ml:
+                    ax2.plot([p[0] for p in valid_ml], [p[1] for p in valid_ml],
+                             color="#38bdf8", linewidth=1.5, label="MACD (12−26)")
+                valid_sl = [(xs_m[i], sl[i]) for i in range(len(sl)) if _valid(sl[i])]
+                if valid_sl:
+                    ax2.plot([p[0] for p in valid_sl], [p[1] for p in valid_sl],
+                             color="#ffa726", linewidth=1.2, label="Signal (9)")
+                ax2.axhline(0, color="#30363d", linewidth=0.8)
+                last_m = next((v for v in reversed(ml) if _valid(v)), None)
+                last_s = next((v for v in reversed(sl) if _valid(v)), None)
+                if last_m is not None and last_s is not None:
+                    _trend = "▲ Bullish" if last_m > last_s else "▼ Bearish"
+                    status = f"{_trend}   MACD {last_m:+.3f}   Signal {last_s:+.3f}"
+                else:
+                    status = ""
+                ax2.set_title(f"MACD (12, 26, 9)   {status}", color="white", fontsize=10, pad=6)
+                ax2.legend(fontsize=7, loc="upper left", facecolor="#161b22",
+                           edgecolor="#30363d", labelcolor="white", framealpha=0.8)
             else:
-                bar_colors.append("#ef5350")
+                ax2.text(0.5, 0.5, "MACD unavailable", ha="center", va="center",
+                         color="gray", transform=ax2.transAxes)
+                ax2.set_title("MACD (12, 26, 9)", color="white", fontsize=10, pad=6)
+            ax2.tick_params(colors="gray", labelsize=7)
+            for spine in ax2.spines.values():
+                spine.set_edgecolor("#30363d")
 
-        ax5.bar(xs_v, vol_vals, color=bar_colors, alpha=0.7, width=1.0)
+        elif _cat == "momentum":
+            # ── RSI (14) ──────────────────────────────────────────────────
+            ax3 = fig.add_subplot(gs[row, 0])
+            ax3.set_facecolor("#161b22")
+            if tech:
+                n_all = len(tech["xs"])
+                display_n = min(126, n_all)
+                xs_r = list(range(display_n))
+                rsi_vals = tech["rsi"][-display_n:]
+                valid_rsi = [(xs_r[i], rsi_vals[i]) for i in range(len(rsi_vals)) if _valid(rsi_vals[i])]
+                if valid_rsi:
+                    rx = [p[0] for p in valid_rsi]
+                    ry = [p[1] for p in valid_rsi]
+                    ax3.plot(rx, ry, color="#38bdf8", linewidth=1.4, label="RSI (14)")
+                    ax3.fill_between(rx, ry, 70, where=[v > 70 for v in ry],
+                                     color="#ef5350", alpha=0.25, label="Overbought")
+                    ax3.fill_between(rx, ry, 30, where=[v < 30 for v in ry],
+                                     color="#26a69a", alpha=0.25, label="Oversold")
+                ax3.axhline(70, color="#ef5350", linewidth=0.8, linestyle="--", alpha=0.7)
+                ax3.axhline(50, color="#888888", linewidth=0.6, linestyle=":")
+                ax3.axhline(30, color="#26a69a", linewidth=0.8, linestyle="--", alpha=0.7)
+                ax3.set_ylim(0, 100)
+                ax3.set_yticks([30, 50, 70])
+                ax3.set_yticklabels(["30", "50", "70"], color="gray", fontsize=7)
+                last_rsi = next((v for v in reversed(rsi_vals) if _valid(v)), None)
+                rsi_status = f"  ·  {last_rsi:.1f}" if last_rsi is not None else ""
+                rsi_label = (" — Overbought" if last_rsi and last_rsi > 70
+                             else " — Oversold" if last_rsi and last_rsi < 30 else "")
+                ax3.set_title(f"RSI (14){rsi_status}{rsi_label}", color="white", fontsize=10, pad=6)
+                ax3.legend(fontsize=6, loc="upper left", facecolor="#161b22",
+                           edgecolor="#30363d", labelcolor="white", framealpha=0.8)
+            else:
+                ax3.text(0.5, 0.5, "RSI unavailable", ha="center", va="center",
+                         color="gray", transform=ax3.transAxes)
+                ax3.set_title("RSI (14)", color="white", fontsize=10, pad=6)
+            ax3.tick_params(colors="gray", labelsize=7)
+            for spine in ax3.spines.values():
+                spine.set_edgecolor("#30363d")
 
-        # Rolling mean line
-        valid_vm = [(xs_v[i], vm_vals[i]) for i in range(len(vm_vals)) if _valid(vm_vals[i])]
-        if valid_vm:
-            ax5.plot([p[0] for p in valid_vm], [p[1] for p in valid_vm],
-                     color="#ffa726", linewidth=1.1, label="Vol MA(20)")
+            # ── Stochastic (14, 3) ─────────────────────────────────────────
+            ax4 = fig.add_subplot(gs[row, 1])
+            ax4.set_facecolor("#161b22")
+            if tech:
+                n_all = len(tech["xs"])
+                display_n = min(126, n_all)
+                xs_s = list(range(display_n))
+                sk_vals = tech["stoch_k"][-display_n:]
+                sd_vals = tech["stoch_d"][-display_n:]
+                valid_sk = [(xs_s[i], sk_vals[i]) for i in range(len(sk_vals)) if _valid(sk_vals[i])]
+                valid_sd = [(xs_s[i], sd_vals[i]) for i in range(len(sd_vals)) if _valid(sd_vals[i])]
+                if valid_sk:
+                    skx = [p[0] for p in valid_sk]
+                    sky = [p[1] for p in valid_sk]
+                    ax4.plot(skx, sky, color="#a78bfa", linewidth=1.4, label="%K (14)")
+                    ax4.fill_between(skx, sky, 80, where=[v > 80 for v in sky],
+                                     color="#ef5350", alpha=0.20)
+                    ax4.fill_between(skx, sky, 20, where=[v < 20 for v in sky],
+                                     color="#26a69a", alpha=0.20)
+                if valid_sd:
+                    ax4.plot([p[0] for p in valid_sd], [p[1] for p in valid_sd],
+                             color="#ffa726", linewidth=1.1, linestyle="--", label="%D (3)")
+                ax4.axhline(80, color="#ef5350", linewidth=0.8, linestyle="--", alpha=0.7)
+                ax4.axhline(50, color="#888888", linewidth=0.6, linestyle=":")
+                ax4.axhline(20, color="#26a69a", linewidth=0.8, linestyle="--", alpha=0.7)
+                ax4.set_ylim(0, 100)
+                ax4.set_yticks([20, 50, 80])
+                ax4.set_yticklabels(["20", "50", "80"], color="gray", fontsize=7)
+                last_sk = next((v for v in reversed(sk_vals) if _valid(v)), None)
+                last_sd = next((v for v in reversed(sd_vals) if _valid(v)), None)
+                stoch_status = (f"  ·  %K={last_sk:.1f}  %D={last_sd:.1f}"
+                                if last_sk is not None and last_sd is not None else "")
+                stoch_zone = (" — Overbought" if last_sk and last_sk > 80
+                              else " — Oversold" if last_sk and last_sk < 20 else "")
+                ax4.set_title(f"Stochastic (14, 3){stoch_status}{stoch_zone}",
+                              color="white", fontsize=10, pad=6)
+                ax4.legend(fontsize=6, loc="upper left", facecolor="#161b22",
+                           edgecolor="#30363d", labelcolor="white", framealpha=0.8)
+            else:
+                ax4.text(0.5, 0.5, "Stochastic unavailable", ha="center", va="center",
+                         color="gray", transform=ax4.transAxes)
+                ax4.set_title("Stochastic (14, 3)", color="white", fontsize=10, pad=6)
+            ax4.tick_params(colors="gray", labelsize=7)
+            for spine in ax4.spines.values():
+                spine.set_edgecolor("#30363d")
 
-        # Spike markers
-        spike_xs = [xs_v[i] for i in range(len(spk_vals)) if spk_vals[i]]
-        spike_ys = [vol_vals[i] for i in spike_xs]
-        if spike_xs:
-            ax5.scatter(spike_xs, spike_ys, color="#ffd700", s=40,
-                        zorder=5, marker="^", label="Spike")
-
-        ax5.yaxis.set_major_formatter(
-            plt.FuncFormatter(lambda x, _: f"{x/1e6:.0f}M" if x >= 1e6 else f"{x/1e3:.0f}K")
-        )
-        ax5.set_title("Volume  (green=up day, red=down day, ▲=spike)",
-                      color="white", fontsize=10, pad=6)
-        ax5.legend(fontsize=6, loc="upper left", facecolor="#161b22",
-                   edgecolor="#30363d", labelcolor="white", framealpha=0.8)
-    else:
-        ax5.text(0.5, 0.5, "Volume unavailable", ha="center", va="center",
-                 color="gray", transform=ax5.transAxes)
-        ax5.set_title("Volume", color="white", fontsize=10, pad=6)
-
-    ax5.tick_params(colors="gray", labelsize=7)
-    for spine in ax5.spines.values():
-        spine.set_edgecolor("#30363d")
-
-    # ── Panel 6: OBV (On-Balance Volume) ──────────────────────────────────
-    ax6 = fig.add_subplot(gs[3, 1])
-    ax6.set_facecolor("#161b22")
-
-    if tech:
-        n_all = len(tech["xs"])
-        display_n = min(126, n_all)
-        xs_o = list(range(display_n))
-        obv_vals = tech["obv"][-display_n:]
-
-        valid_obv = [(xs_o[i], obv_vals[i]) for i in range(len(obv_vals)) if _valid(obv_vals[i])]
-        if valid_obv:
-            ox = [p[0] for p in valid_obv]
-            oy = [p[1] for p in valid_obv]
-            obv_color = "#26a69a" if tech["obv_trend"] == "rising" else "#ef5350"
-            ax6.plot(ox, oy, color=obv_color, linewidth=1.4, label="OBV")
-            ax6.fill_between(ox, oy, min(oy), alpha=0.12, color=obv_color)
-
-        trend_label = tech.get("obv_trend", "").capitalize() or "N/A"
-        ax6.set_title(f"OBV — {trend_label}", color="white", fontsize=10, pad=6)
-        ax6.yaxis.set_major_formatter(
-            plt.FuncFormatter(lambda x, _: f"{x/1e6:.1f}M" if abs(x) >= 1e6 else f"{x/1e3:.0f}K")
-        )
-        ax6.legend(fontsize=6, loc="upper left", facecolor="#161b22",
-                   edgecolor="#30363d", labelcolor="white", framealpha=0.8)
-    else:
-        ax6.text(0.5, 0.5, "OBV unavailable", ha="center", va="center",
-                 color="gray", transform=ax6.transAxes)
-        ax6.set_title("OBV", color="white", fontsize=10, pad=6)
-
-    ax6.tick_params(colors="gray", labelsize=7)
-    for spine in ax6.spines.values():
-        spine.set_edgecolor("#30363d")
-
-    # ── Panel 7: Support & Resistance — full width ────────────────────────
-    ax7 = fig.add_subplot(gs[4, :])
-    ax7.set_facecolor("#161b22")
-
-    if tech:
-        n_all = len(tech["xs"])
-        sr_n = min(60, n_all)           # last 60 days for S&R detail
-        sr_xs = list(range(sr_n))
-        sr_cl = tech["closes"][-sr_n:]
-        sr_offset = n_all - sr_n
-
-        ax7.plot(sr_xs, sr_cl, color=main_color, linewidth=1.4, label="Price", zorder=3)
-        ax7.fill_between(sr_xs, sr_cl, alpha=0.07, color=main_color)
-
-        # Fibonacci levels
-        fib_colors = {
-            "0.0%":  "#94a3b8", "23.6%": "#60a5fa", "38.2%": "#818cf8",
-            "50.0%": "#a78bfa", "61.8%": "#c084fc", "78.6%": "#e879f9", "100%": "#94a3b8",
-        }
-        key_fibs = {"38.2%", "50.0%", "61.8%"}
-        for label, price_val in tech["fib_levels"].items():
-            lw = 1.2 if label in key_fibs else 0.7
-            ls = "--" if label in key_fibs else ":"
-            ax7.axhline(price_val, color=fib_colors.get(label, "#888"),
-                        linewidth=lw, linestyle=ls, alpha=0.8)
-            ax7.text(sr_n - 0.5, price_val, f" Fib {label} ${price_val:.2f}",
-                     color=fib_colors.get(label, "#888"), fontsize=6, va="center")
-
-        # Pivot Points
-        pv = tech["pivot_points"]
-        pv_styles = {
-            "R2": ("#ef5350", "-",  0.8), "R1": ("#ef9a9a", "--", 0.8),
-            "PP": ("#ffd700", "-",  1.0),
-            "S1": ("#a5d6a7", "--", 0.8), "S2": ("#26a69a", "-",  0.8),
-        }
-        for name, price_val in pv.items():
-            col, ls, lw = pv_styles[name]
-            ax7.axhline(price_val, color=col, linewidth=lw, linestyle=ls, alpha=0.85)
-            ax7.text(0.5, price_val, f" {name} ${price_val:.2f}",
-                     color=col, fontsize=6, va="center")
-
-        # Trendlines on S&R panel
-        for tl_key, tl_color, tl_lbl in [
-            ("support_line", "#22d3ee", "Support"), ("resistance_line", "#f472b6", "Resist."),
-        ]:
-            tl = tech.get(tl_key)
-            if tl:
-                x2d = tl["x2"] - sr_offset
-                if x2d >= 0:
-                    x1d = max(tl["x1"] - sr_offset, 0)
-                    x_end = sr_n - 1
-                    tl_ys = [
-                        tl["y2"] + tl["slope"] * (x1d - x2d),
-                        tl["y2"] + tl["slope"] * (x_end - x2d),
-                    ]
-                    ax7.plot([x1d, x_end], tl_ys, color=tl_color,
-                             linewidth=1.2, linestyle="-.", alpha=0.9, label=tl_lbl)
-
-        ax7.set_title("Support & Resistance  (Fib Retracement · Pivot Points · Trendlines)",
-                      color="white", fontsize=10, pad=6)
-        ax7.legend(fontsize=6, loc="upper left", facecolor="#161b22",
-                   edgecolor="#30363d", labelcolor="white", framealpha=0.8)
-    else:
-        ax7.text(0.5, 0.5, "S&R unavailable", ha="center", va="center",
-                 color="gray", transform=ax7.transAxes)
-        ax7.set_title("Support & Resistance", color="white", fontsize=10, pad=6)
-
-    ax7.tick_params(colors="gray", labelsize=7)
-    for spine in ax7.spines.values():
-        spine.set_edgecolor("#30363d")
-
-    # ── Panel 8: ATR (14) — full width ────────────────────────────────────
-    ax8_atr = fig.add_subplot(gs[5, :])
-    ax8_atr.set_facecolor("#161b22")
-
-    if tech:
-        n_all = len(tech["xs"])
-        display_n = min(126, n_all)
-        xs_a = list(range(display_n))
-        atr_vals  = tech["atr"][-display_n:]
-        atrm_vals = tech["atr_mean"][-display_n:]
-
-        valid_atr  = [(xs_a[i], atr_vals[i])  for i in range(len(atr_vals))  if _valid(atr_vals[i])]
-        valid_atrm = [(xs_a[i], atrm_vals[i]) for i in range(len(atrm_vals)) if _valid(atrm_vals[i])]
-
-        if valid_atr:
-            ax_x = [p[0] for p in valid_atr]
-            ax_y = [p[1] for p in valid_atr]
-            atr_color = (
-                "#ef5350" if tech["atr_level"] == "high"
-                else "#26a69a" if tech["atr_level"] == "low"
-                else "#ffa726"
-            )
-            ax8_atr.plot(ax_x, ax_y, color=atr_color, linewidth=1.4, label="ATR (14)")
-
-        if valid_atrm:
-            ax8_atr.plot([p[0] for p in valid_atrm], [p[1] for p in valid_atrm],
-                         color="#888888", linewidth=1.0, linestyle="--", alpha=0.7, label="ATR MA(20)")
-
-        if valid_atr and valid_atrm:
-            atr_dict  = {p[0]: p[1] for p in valid_atr}
-            atrm_dict = {p[0]: p[1] for p in valid_atrm}
-            common = [x for x in atrm_dict if x in atr_dict]
-            if common:
-                ax8_atr.fill_between(
-                    common,
-                    [atr_dict[x] for x in common],
-                    [atrm_dict[x] for x in common],
-                    where=[atr_dict[x] >= atrm_dict[x] for x in common],
-                    alpha=0.18, color="#ef5350", label="High vol",
+        elif _cat == "volume":
+            # ── Volume + Spike markers ─────────────────────────────────────
+            ax5 = fig.add_subplot(gs[row, 0])
+            ax5.set_facecolor("#161b22")
+            if tech:
+                n_all = len(tech["xs"])
+                display_n = min(126, n_all)
+                xs_v = list(range(display_n))
+                vol_vals  = tech["volume"][-display_n:]
+                vm_vals   = tech["vol_mean"][-display_n:]
+                spk_vals  = tech["vol_spike"][-display_n:]
+                cl_vals   = tech["closes"][-display_n:]
+                prev_cl   = tech["closes"][-(display_n + 1):-1]
+                bar_colors = []
+                for i in range(len(vol_vals)):
+                    if i == 0 or not _valid(cl_vals[i]) or not _valid(prev_cl[i]):
+                        bar_colors.append("#888888")
+                    elif cl_vals[i] >= prev_cl[i]:
+                        bar_colors.append("#26a69a")
+                    else:
+                        bar_colors.append("#ef5350")
+                ax5.bar(xs_v, vol_vals, color=bar_colors, alpha=0.7, width=1.0)
+                valid_vm = [(xs_v[i], vm_vals[i]) for i in range(len(vm_vals)) if _valid(vm_vals[i])]
+                if valid_vm:
+                    ax5.plot([p[0] for p in valid_vm], [p[1] for p in valid_vm],
+                             color="#ffa726", linewidth=1.1, label="Vol MA(20)")
+                spike_xs = [xs_v[i] for i in range(len(spk_vals)) if spk_vals[i]]
+                spike_ys = [vol_vals[i] for i in spike_xs]
+                if spike_xs:
+                    ax5.scatter(spike_xs, spike_ys, color="#ffd700", s=40,
+                                zorder=5, marker="^", label="Spike")
+                ax5.yaxis.set_major_formatter(
+                    plt.FuncFormatter(lambda x, _: f"{x/1e6:.0f}M" if x >= 1e6 else f"{x/1e3:.0f}K")
                 )
-                ax8_atr.fill_between(
-                    common,
-                    [atr_dict[x] for x in common],
-                    [atrm_dict[x] for x in common],
-                    where=[atr_dict[x] < atrm_dict[x] for x in common],
-                    alpha=0.18, color="#26a69a", label="Low vol",
+                ax5.set_title("Volume  (green=up day, red=down day, ▲=spike)",
+                              color="white", fontsize=10, pad=6)
+                ax5.legend(fontsize=6, loc="upper left", facecolor="#161b22",
+                           edgecolor="#30363d", labelcolor="white", framealpha=0.8)
+            else:
+                ax5.text(0.5, 0.5, "Volume unavailable", ha="center", va="center",
+                         color="gray", transform=ax5.transAxes)
+                ax5.set_title("Volume", color="white", fontsize=10, pad=6)
+            ax5.tick_params(colors="gray", labelsize=7)
+            for spine in ax5.spines.values():
+                spine.set_edgecolor("#30363d")
+
+            # ── OBV ────────────────────────────────────────────────────────
+            ax6 = fig.add_subplot(gs[row, 1])
+            ax6.set_facecolor("#161b22")
+            if tech:
+                n_all = len(tech["xs"])
+                display_n = min(126, n_all)
+                xs_o = list(range(display_n))
+                obv_vals = tech["obv"][-display_n:]
+                valid_obv = [(xs_o[i], obv_vals[i]) for i in range(len(obv_vals)) if _valid(obv_vals[i])]
+                if valid_obv:
+                    ox = [p[0] for p in valid_obv]
+                    oy = [p[1] for p in valid_obv]
+                    obv_color = "#26a69a" if tech["obv_trend"] == "rising" else "#ef5350"
+                    ax6.plot(ox, oy, color=obv_color, linewidth=1.4, label="OBV")
+                    ax6.fill_between(ox, oy, min(oy), alpha=0.12, color=obv_color)
+                trend_label = tech.get("obv_trend", "").capitalize() or "N/A"
+                ax6.set_title(f"OBV — {trend_label}", color="white", fontsize=10, pad=6)
+                ax6.yaxis.set_major_formatter(
+                    plt.FuncFormatter(lambda x, _: f"{x/1e6:.1f}M" if abs(x) >= 1e6 else f"{x/1e3:.0f}K")
                 )
+                ax6.legend(fontsize=6, loc="upper left", facecolor="#161b22",
+                           edgecolor="#30363d", labelcolor="white", framealpha=0.8)
+            else:
+                ax6.text(0.5, 0.5, "OBV unavailable", ha="center", va="center",
+                         color="gray", transform=ax6.transAxes)
+                ax6.set_title("OBV", color="white", fontsize=10, pad=6)
+            ax6.tick_params(colors="gray", labelsize=7)
+            for spine in ax6.spines.values():
+                spine.set_edgecolor("#30363d")
 
-        last_atr_v = next((v for v in reversed(atr_vals) if _valid(v)), None)
-        ratio = tech.get("atr_ratio", 1.0)
-        level = tech.get("atr_level", "medium").capitalize()
-        atr_status = f"  ·  {last_atr_v:.2f}  ({ratio:.1f}× avg)  —  {level} volatility" if last_atr_v else ""
-        ax8_atr.set_title(f"ATR (14){atr_status}", color="white", fontsize=10, pad=6)
-        ax8_atr.legend(fontsize=6, loc="upper left", facecolor="#161b22",
-                       edgecolor="#30363d", labelcolor="white", framealpha=0.8, ncol=4)
-    else:
-        ax8_atr.text(0.5, 0.5, "ATR unavailable", ha="center", va="center",
-                     color="gray", transform=ax8_atr.transAxes)
-        ax8_atr.set_title("ATR (14)", color="white", fontsize=10, pad=6)
+        elif _cat == "support":
+            # ── Support & Resistance ────────────────────────────────────────
+            ax7 = fig.add_subplot(gs[row, :])
+            ax7.set_facecolor("#161b22")
+            if tech:
+                n_all = len(tech["xs"])
+                sr_n = min(60, n_all)
+                sr_xs = list(range(sr_n))
+                sr_cl = tech["closes"][-sr_n:]
+                sr_offset = n_all - sr_n
+                ax7.plot(sr_xs, sr_cl, color=main_color, linewidth=1.4, label="Price", zorder=3)
+                ax7.fill_between(sr_xs, sr_cl, alpha=0.07, color=main_color)
+                fib_colors = {
+                    "0.0%":  "#94a3b8", "23.6%": "#60a5fa", "38.2%": "#818cf8",
+                    "50.0%": "#a78bfa", "61.8%": "#c084fc", "78.6%": "#e879f9", "100%": "#94a3b8",
+                }
+                key_fibs = {"38.2%", "50.0%", "61.8%"}
+                for label, price_val in tech["fib_levels"].items():
+                    lw = 1.2 if label in key_fibs else 0.7
+                    ls = "--" if label in key_fibs else ":"
+                    ax7.axhline(price_val, color=fib_colors.get(label, "#888"),
+                                linewidth=lw, linestyle=ls, alpha=0.8)
+                    ax7.text(sr_n - 0.5, price_val, f" Fib {label} ${price_val:.2f}",
+                             color=fib_colors.get(label, "#888"), fontsize=6, va="center")
+                pv = tech["pivot_points"]
+                pv_styles = {
+                    "R2": ("#ef5350", "-",  0.8), "R1": ("#ef9a9a", "--", 0.8),
+                    "PP": ("#ffd700", "-",  1.0),
+                    "S1": ("#a5d6a7", "--", 0.8), "S2": ("#26a69a", "-",  0.8),
+                }
+                for name, price_val in pv.items():
+                    col, ls, lw = pv_styles[name]
+                    ax7.axhline(price_val, color=col, linewidth=lw, linestyle=ls, alpha=0.85)
+                    ax7.text(0.5, price_val, f" {name} ${price_val:.2f}",
+                             color=col, fontsize=6, va="center")
+                for tl_key, tl_color, tl_lbl in [
+                    ("support_line", "#22d3ee", "Support"), ("resistance_line", "#f472b6", "Resist."),
+                ]:
+                    tl = tech.get(tl_key)
+                    if tl:
+                        x2d = tl["x2"] - sr_offset
+                        if x2d >= 0:
+                            x1d = max(tl["x1"] - sr_offset, 0)
+                            x_end = sr_n - 1
+                            tl_ys = [
+                                tl["y2"] + tl["slope"] * (x1d - x2d),
+                                tl["y2"] + tl["slope"] * (x_end - x2d),
+                            ]
+                            ax7.plot([x1d, x_end], tl_ys, color=tl_color,
+                                     linewidth=1.2, linestyle="-.", alpha=0.9, label=tl_lbl)
+                ax7.set_title("Support & Resistance  (Fib Retracement · Pivot Points · Trendlines)",
+                              color="white", fontsize=10, pad=6)
+                ax7.legend(fontsize=6, loc="upper left", facecolor="#161b22",
+                           edgecolor="#30363d", labelcolor="white", framealpha=0.8)
+            else:
+                ax7.text(0.5, 0.5, "S&R unavailable", ha="center", va="center",
+                         color="gray", transform=ax7.transAxes)
+                ax7.set_title("Support & Resistance", color="white", fontsize=10, pad=6)
+            ax7.tick_params(colors="gray", labelsize=7)
+            for spine in ax7.spines.values():
+                spine.set_edgecolor("#30363d")
 
-    ax8_atr.tick_params(colors="gray", labelsize=7)
-    for spine in ax8_atr.spines.values():
-        spine.set_edgecolor("#30363d")
+        elif _cat == "volatility":
+            # ── ATR (14) ────────────────────────────────────────────────────
+            ax8_atr = fig.add_subplot(gs[row, :])
+            ax8_atr.set_facecolor("#161b22")
+            if tech:
+                n_all = len(tech["xs"])
+                display_n = min(126, n_all)
+                xs_a = list(range(display_n))
+                atr_vals  = tech["atr"][-display_n:]
+                atrm_vals = tech["atr_mean"][-display_n:]
+                valid_atr  = [(xs_a[i], atr_vals[i])  for i in range(len(atr_vals))  if _valid(atr_vals[i])]
+                valid_atrm = [(xs_a[i], atrm_vals[i]) for i in range(len(atrm_vals)) if _valid(atrm_vals[i])]
+                if valid_atr:
+                    ax_x = [p[0] for p in valid_atr]
+                    ax_y = [p[1] for p in valid_atr]
+                    atr_color = (
+                        "#ef5350" if tech["atr_level"] == "high"
+                        else "#26a69a" if tech["atr_level"] == "low"
+                        else "#ffa726"
+                    )
+                    ax8_atr.plot(ax_x, ax_y, color=atr_color, linewidth=1.4, label="ATR (14)")
+                if valid_atrm:
+                    ax8_atr.plot([p[0] for p in valid_atrm], [p[1] for p in valid_atrm],
+                                 color="#888888", linewidth=1.0, linestyle="--", alpha=0.7, label="ATR MA(20)")
+                if valid_atr and valid_atrm:
+                    atr_dict  = {p[0]: p[1] for p in valid_atr}
+                    atrm_dict = {p[0]: p[1] for p in valid_atrm}
+                    common = [x for x in atrm_dict if x in atr_dict]
+                    if common:
+                        ax8_atr.fill_between(
+                            common,
+                            [atr_dict[x] for x in common],
+                            [atrm_dict[x] for x in common],
+                            where=[atr_dict[x] >= atrm_dict[x] for x in common],
+                            alpha=0.18, color="#ef5350", label="High vol",
+                        )
+                        ax8_atr.fill_between(
+                            common,
+                            [atr_dict[x] for x in common],
+                            [atrm_dict[x] for x in common],
+                            where=[atr_dict[x] < atrm_dict[x] for x in common],
+                            alpha=0.18, color="#26a69a", label="Low vol",
+                        )
+                last_atr_v = next((v for v in reversed(atr_vals) if _valid(v)), None)
+                ratio = tech.get("atr_ratio", 1.0)
+                level = tech.get("atr_level", "medium").capitalize()
+                atr_status = f"  ·  {last_atr_v:.2f}  ({ratio:.1f}× avg)  —  {level} volatility" if last_atr_v else ""
+                ax8_atr.set_title(f"ATR (14){atr_status}", color="white", fontsize=10, pad=6)
+                ax8_atr.legend(fontsize=6, loc="upper left", facecolor="#161b22",
+                               edgecolor="#30363d", labelcolor="white", framealpha=0.8, ncol=4)
+            else:
+                ax8_atr.text(0.5, 0.5, "ATR unavailable", ha="center", va="center",
+                             color="gray", transform=ax8_atr.transAxes)
+                ax8_atr.set_title("ATR (14)", color="white", fontsize=10, pad=6)
+            ax8_atr.tick_params(colors="gray", labelsize=7)
+            for spine in ax8_atr.spines.values():
+                spine.set_edgecolor("#30363d")
 
-    # ── Panel 9: Confidence + Risk gauge ──────────────────────────────────
-    ax8 = fig.add_subplot(gs[6, 0])
+        row += 1
+
+    # ── Confidence + Risk gauge ────────────────────────────────────────────
+    ax8 = fig.add_subplot(gs[row, 0])
     ax8.set_facecolor("#161b22")
     ax8.set_xlim(0, 1)
     ax8.set_ylim(0, 1)
@@ -1016,7 +1003,7 @@ def generate_chart(prediction: dict, charts_dir: str) -> str:
     ax8.set_title("Confidence & Risk", color="white", fontsize=10, pad=6)
 
     # ── Panel 10: Technical signal factors ────────────────────────────────
-    ax9 = fig.add_subplot(gs[6, 1])
+    ax9 = fig.add_subplot(gs[row, 1])
     ax9.set_facecolor("#161b22")
     if factors:
         y_pos = range(len(factors))
@@ -1046,7 +1033,7 @@ def generate_chart(prediction: dict, charts_dir: str) -> str:
     return chart_path
 
 
-def predict_stock(ticker: str, timeframe: str = "1w", md_file=None, charts_dir: str = "charts", model: str = "claude-sonnet-4-6") -> None:
+def predict_stock(ticker: str, timeframe: str = "1w", md_file=None, charts_dir: str = "charts", model: str = "claude-sonnet-4-6", indicators: set | None = None) -> None:
     print(f"\nAnalyzing {ticker.upper()} for {timeframe} timeframe... (model: {model})\n")
 
     messages = [
@@ -1075,7 +1062,7 @@ def predict_stock(ticker: str, timeframe: str = "1w", md_file=None, charts_dir: 
                 ticker_input = block.input.get("ticker", ticker)
                 tf_input = block.input.get("timeframe", timeframe)
                 print(f"Tool called: ticker={ticker_input}, timeframe={tf_input}")
-                prediction = run_prediction(ticker_input, tf_input)
+                prediction = run_prediction(ticker_input, tf_input, indicators=indicators)
                 last_prediction = prediction
                 print(f"Prediction data: {json.dumps(prediction, indent=2)}\n")
                 tool_results.append({
@@ -1114,6 +1101,8 @@ def predict_stock(ticker: str, timeframe: str = "1w", md_file=None, charts_dir: 
 
 
 if __name__ == "__main__":
+    _all_indicators = ["trend", "momentum", "volatility", "volume", "support"]
+
     parser = argparse.ArgumentParser(
         description="Stock Predictor — AI-powered stock analysis",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -1125,6 +1114,8 @@ if __name__ == "__main__":
             "  python stock_predictor.py --tickers MSFT --timeframe 3m\n"
             "  python stock_predictor.py --tickers GOOG AMZN --timeframe 1d\n"
             "  python stock_predictor.py --tickers AAPL --model claude-opus-4-7\n"
+            "  python stock_predictor.py --tickers AAPL --indicators trend momentum\n"
+            "  python stock_predictor.py --tickers TSLA --indicators volatility volume\n"
         ),
     )
     parser.add_argument(
@@ -1141,7 +1132,18 @@ if __name__ == "__main__":
         metavar="MODEL",
         help="Claude model ID to use (default: claude-sonnet-4-6)",
     )
+    parser.add_argument(
+        "--indicators", nargs="+",
+        choices=_all_indicators,
+        default=None,
+        metavar="INDICATOR",
+        help=(
+            "indicator categories to include: trend momentum volatility volume support "
+            "(default: all). Example: --indicators trend momentum"
+        ),
+    )
     args = parser.parse_args()
+    active_indicators = set(args.indicators) if args.indicators else set(_all_indicators)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     run_dir = os.path.join("results", timestamp)
@@ -1154,12 +1156,13 @@ if __name__ == "__main__":
         f.write(f"**Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
         tickers_str = ", ".join(t.upper() for t in args.tickers)
         tf_str = args.timeframe or "per-ticker default"
-        f.write(f"**Tickers:** {tickers_str}  \n**Timeframe:** {tf_str}  \n**Model:** {args.model}\n\n")
+        ind_str = ", ".join(sorted(active_indicators))
+        f.write(f"**Tickers:** {tickers_str}  \n**Timeframe:** {tf_str}  \n**Model:** {args.model}  \n**Indicators:** {ind_str}\n\n")
         f.write("---\n\n")
 
         default_timeframes = {"AAPL": "1w", "TSLA": "1m", "INTC": "1m"}
         for ticker in args.tickers:
             tf = args.timeframe or default_timeframes.get(ticker.upper(), "1w")
-            predict_stock(ticker, tf, md_file=f, charts_dir=charts_dir, model=args.model)
+            predict_stock(ticker, tf, md_file=f, charts_dir=charts_dir, model=args.model, indicators=active_indicators)
 
     print(f"\nResults saved to: {run_dir}/")

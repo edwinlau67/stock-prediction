@@ -13,7 +13,7 @@ CLI args → Claude → Stock Prediction tool call → Live price + technical in
 3. Stock Prediction fetches the **real current price** and computes trend-following indicators (SMA, EMA, MACD) from Yahoo Finance
 4. Direction and confidence are derived from real technical signals (Golden/Death Cross, MACD crossovers, price vs MAs)
 5. Claude analyzes the data and writes a formatted Markdown report
-6. A 3-panel analysis chart (PNG) is generated per ticker
+6. An analysis chart (PNG) is generated per ticker — only the selected indicator panels are included
 7. All output is saved into a timestamped folder under `results/`
 
 ## Requirements
@@ -74,17 +74,35 @@ python stock_predictor.py --tickers NVDA --timeframe 6m
 python stock_predictor.py --tickers AAPL --model claude-opus-4-7
 ```
 
+### Select indicator categories
+
+Run with only a subset of indicator categories. Omitting a category removes it from both the scoring engine and the chart panels.
+
+```bash
+# Trend and momentum only
+python stock_predictor.py --tickers AAPL --indicators trend momentum
+
+# Volatility and volume only
+python stock_predictor.py --tickers TSLA --indicators volatility volume
+
+# Single category
+python stock_predictor.py --tickers NVDA --indicators support
+```
+
 ### All options
 
 ```
 usage: stock_predictor.py [-h] [--tickers TICKER [TICKER ...]]
                           [--timeframe {1d,1w,1m,3m,6m}]
                           [--model MODEL]
+                          [--indicators INDICATOR [INDICATOR ...]]
 
 options:
-  --tickers   One or more stock ticker symbols (default: AAPL TSLA INTC)
-  --timeframe Prediction timeframe for all tickers: 1d, 1w, 1m, 3m, 6m (default: 1w)
-  --model     Claude model ID to use (default: claude-sonnet-4-6)
+  --tickers     One or more stock ticker symbols (default: AAPL TSLA INTC)
+  --timeframe   Prediction timeframe for all tickers: 1d, 1w, 1m, 3m, 6m (default: 1w)
+  --model       Claude model ID to use (default: claude-sonnet-4-6)
+  --indicators  Indicator categories to include (default: all five)
+                Choices: trend  momentum  volatility  volume  support
 ```
 
 ### Supported timeframes
@@ -125,24 +143,31 @@ The `predictions.md` file contains a full analysis per ticker including a summar
 
 ### Analysis charts
 
-Each PNG chart contains 10 panels across 7 rows:
+The chart is built dynamically — only panels for selected indicator categories are included, and the figure height scales accordingly. The two panels below are always present regardless of indicator selection:
 
-| Panel | Description |
-|-------|-------------|
-| **Price + MA + BB + Trendlines + Target** | 6-month price with SMA50/200, EMA20, Bollinger Bands (pink), support (cyan dash-dot) and resistance (pink dash-dot) trendlines, Golden/Death Cross, and projected target |
-| **MACD (12, 26, 9)** | Histogram (green/red bars), MACD line, and signal line with current crossover status in the title |
-| **RSI (14)** | RSI line with overbought (>70) and oversold (<30) fill zones; current value and zone label in title |
-| **Stochastic (14, 3)** | %K (fast) and %D (signal) lines with overbought (>80) and oversold (<20) fill zones; current values in title |
-| **Volume + Spikes** | Bar chart coloured green (up day) / red (down day), 20-day mean line, and gold triangle markers for volume spikes (>2σ above mean) |
-| **OBV (On-Balance Volume)** | Cumulative OBV line coloured by trend (green=rising, red=falling) with fill; trend label in title |
-| **Support & Resistance** | Last 60 days of price with Fibonacci retracement levels (0%–100%), standard Pivot Points (PP/R1/R2/S1/S2), and trendlines — all labelled with price values |
-| **ATR (14)** | ATR line coloured by volatility level, 20-day ATR mean (dashed), fill shaded red above mean / green below; current value and ratio in title |
-| **Confidence & Risk** | Arc gauge showing confidence %, risk pill (ATR-derived), and direction label |
-| **Technical Signal Factors** | Horizontal bar chart of the indicator signals that drove the prediction direction |
+| Panel | Always shown | Description |
+|-------|:---:|-------------|
+| **Price + Target** | ✓ | 6-month price with projected target; overlays (SMA/EMA, BB, trendlines, cross markers) appear only if their category is selected |
+| **Confidence & Risk** | ✓ | Arc gauge showing confidence %, risk pill (ATR-derived), and direction label |
+| **Technical Signal Factors** | ✓ | Horizontal bar chart of the indicator signals that drove the direction |
+
+Optional panels — included only when the matching `--indicators` category is selected:
+
+| Panel | Category | Description |
+|-------|----------|-------------|
+| **MACD (12, 26, 9)** | `trend` | Histogram (green/red bars), MACD line, and signal line with current crossover status in the title |
+| **RSI (14)** | `momentum` | RSI line with overbought (>70) and oversold (<30) fill zones; current value and zone label in title |
+| **Stochastic (14, 3)** | `momentum` | %K (fast) and %D (signal) lines with overbought (>80) and oversold (<20) fill zones; current values in title |
+| **Volume + Spikes** | `volume` | Bar chart coloured green (up day) / red (down day), 20-day mean line, and gold triangle markers for volume spikes (>2σ above mean) |
+| **OBV (On-Balance Volume)** | `volume` | Cumulative OBV line coloured by trend (green=rising, red=falling) with fill; trend label in title |
+| **Support & Resistance** | `support` | Last 60 days of price with Fibonacci retracement levels (0%–100%), Pivot Points (PP/R1/R2/S1/S2), and trendlines — all labelled with price values |
+| **ATR (14)** | `volatility` | ATR line coloured by volatility level, 20-day ATR mean (dashed), fill shaded red above mean / green below; current value and ratio in title |
 
 ## Technical Indicators
 
-The prediction engine computes these trend-following indicators on 1 year of daily closes from Yahoo Finance:
+All indicators are computed on 1 year of daily closes from Yahoo Finance. They are grouped into five categories selectable via `--indicators`.
+
+### `trend`
 
 | Indicator | Detail |
 |-----------|--------|
@@ -154,12 +179,32 @@ The prediction engine computes these trend-following indicators on 1 year of dai
 | **MACD (12, 26, 9)** | MACD line (EMA12 − EMA26), signal line (EMA9 of MACD), histogram |
 | **MACD crossover** | MACD line crossing above/below signal line (+2 pts) |
 | **Price vs SMA50/200** | Whether price trades above or below each MA (+1 pt each) |
+
+### `momentum`
+
+| Indicator | Detail |
+|-----------|--------|
 | **RSI (14)** | <30 oversold = bullish (+2 pts), >70 overbought = bearish (+2 pts), above/below 50 midline (+1 pt) |
 | **Stochastic (14, 3)** | %K/%D crossover (+1 pt); %K <20 oversold = bullish (+1 pt), >80 overbought = bearish (+1 pt) |
-| **OBV** | Rising OBV = bullish (+1 pt), falling OBV = bearish (+1 pt) |
-| **Volume Spike** | Spike on up day = bullish (+1 pt), spike on down day = bearish (+1 pt); spike = volume > 20-day mean + 2σ |
+
+### `volatility`
+
+| Indicator | Detail |
+|-----------|--------|
 | **Bollinger Bands (20, 2)** | Price above upper band = overbought → bearish (+1 pt); price below lower band = oversold → bullish (+1 pt) |
 | **ATR (14)** | Drives the `risk_level` field: ATR > 1.3× 20-day avg = high, < 0.8× = low, otherwise medium; also reported as a key factor |
+
+### `volume`
+
+| Indicator | Detail |
+|-----------|--------|
+| **OBV** | Rising OBV = bullish (+1 pt), falling OBV = bearish (+1 pt) |
+| **Volume Spike** | Spike on up day = bullish (+1 pt), spike on down day = bearish (+1 pt); spike = volume > 20-day mean + 2σ |
+
+### `support`
+
+| Indicator | Detail |
+|-----------|--------|
 | **Trendlines** | Rising support trendline + price above it = bullish (+1 pt); price breaks below support = bearish (+1 pt); detected via 5-bar swing point window |
 | **Pivot Points** | Price above PP = bullish (+1 pt), below = bearish (+1 pt); PP/R1/R2/S1/S2 computed from most recent bar's H, L, C |
 | **Fibonacci Retracement** | 6-month H/L range; 38.2%, 50%, 61.8% levels shown as key support/resistance reference lines (visual context, not scored) |
@@ -188,8 +233,9 @@ The **Stock Prediction** tool is defined as an Anthropic tool-use schema. Claude
 | `current_price` | Live price fetched from Yahoo Finance                           |
 | `price_target`  | Projected price at the end of the timeframe                     |
 | `target_date`   | ISO date when the target should be reached                      |
-| `key_factors`   | Up to 5 indicator signals that drove the direction              |
+| `key_factors`   | Up to 6 indicator signals that drove the direction              |
 | `risk_level`    | `low`, `medium`, or `high`                                      |
+| `indicators`    | Sorted list of active indicator categories used for this run    |
 
 ## Project Structure
 
