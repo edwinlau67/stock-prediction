@@ -53,58 +53,145 @@ def get_current_price(ticker: str) -> float:
     return round(float(price), 2)
 
 
-def get_price_history(ticker: str, timeframe: str) -> tuple[list, list]:
-    """Fetch recent historical prices for the sparkline chart."""
-    period_map = {"1d": "5d", "1w": "1mo", "1m": "3mo", "3m": "1y", "6m": "2y"}
-    interval_map = {"1d": "1h", "1w": "1d", "1m": "1wk", "3m": "1mo", "6m": "1mo"}
-    hist = yf.Ticker(ticker).history(
-        period=period_map.get(timeframe, "1mo"),
-        interval=interval_map.get(timeframe, "1d"),
-    )
-    return list(range(len(hist))), list(hist["Close"])
+
+def _valid(v) -> bool:
+    try:
+        return v is not None and not np.isnan(v)
+    except (TypeError, ValueError):
+        return False
 
 
-def get_moving_averages(ticker: str) -> tuple[list, list, list]:
-    """Fetch 1 year of daily closes and return (indices, ma50, ma200)."""
+def get_technical_indicators(ticker: str) -> dict:
+    """Fetch 1 year of daily closes and compute trend-following indicators."""
     hist = yf.Ticker(ticker).history(period="1y", interval="1d")
     closes = hist["Close"]
-    xs = list(range(len(closes)))
-    ma50 = closes.rolling(window=50).mean().tolist()
-    ma200 = closes.rolling(window=200).mean().tolist()
-    return xs, ma50, ma200
 
+    sma50 = closes.rolling(window=50).mean()
+    sma200 = closes.rolling(window=200).mean()
+    ema20 = closes.ewm(span=20, adjust=False).mean()
+    ema12 = closes.ewm(span=12, adjust=False).mean()
+    ema26 = closes.ewm(span=26, adjust=False).mean()
+    macd_line = ema12 - ema26
+    signal_line = macd_line.ewm(span=9, adjust=False).mean()
+    histogram = macd_line - signal_line
 
-def run_openclaw(ticker: str, timeframe: str = "1w") -> dict:
-    directions = ["bullish", "bearish", "neutral"]
-    direction = random.choice(directions)
-    confidence = round(random.uniform(0.55, 0.92), 2)
+    s50 = sma50.tolist()
+    s200 = sma200.tolist()
+    ml = macd_line.tolist()
+    sl = signal_line.tolist()
 
-    base_price = get_current_price(ticker)
-    change_pct = random.uniform(-0.15, 0.20) if direction != "neutral" else random.uniform(-0.05, 0.05)
-    if direction == "bearish":
-        change_pct = -abs(change_pct)
-    price_target = round(base_price * (1 + change_pct), 2)
+    # Most recent Golden Cross / Death Cross over the full year
+    cross_signal = None
+    cross_idx = None
+    for i in range(1, len(s50)):
+        if not all(_valid(v) for v in [s50[i-1], s200[i-1], s50[i], s200[i]]):
+            continue
+        if s50[i-1] < s200[i-1] and s50[i] >= s200[i]:
+            cross_signal, cross_idx = "golden", i
+        elif s50[i-1] > s200[i-1] and s50[i] <= s200[i]:
+            cross_signal, cross_idx = "death", i
 
-    factors = {
-        "bullish": [
-            "Strong earnings momentum",
-            "Positive institutional buying",
-            "Bullish RSI divergence",
-            "Above 50-day moving average",
-        ],
-        "bearish": [
-            "Weakening revenue growth",
-            "Increased short interest",
-            "Death cross pattern forming",
-            "Below key support levels",
-        ],
-        "neutral": [
-            "Mixed analyst sentiment",
-            "Consolidation pattern",
-            "Low volume trading",
-            "Awaiting catalyst",
-        ],
+    # Most recent MACD line / signal-line crossover
+    macd_crossover = None
+    for i in range(1, len(ml)):
+        if not all(_valid(v) for v in [ml[i-1], sl[i-1], ml[i], sl[i]]):
+            continue
+        if ml[i-1] < sl[i-1] and ml[i] >= sl[i]:
+            macd_crossover = "bullish"
+        elif ml[i-1] > sl[i-1] and ml[i] <= sl[i]:
+            macd_crossover = "bearish"
+
+    return {
+        "xs": list(range(len(closes))),
+        "closes": closes.tolist(),
+        "sma50": s50,
+        "sma200": s200,
+        "ema20": ema20.tolist(),
+        "macd_line": ml,
+        "signal_line": sl,
+        "histogram": histogram.tolist(),
+        "cross_signal": cross_signal,
+        "cross_idx": cross_idx,
+        "macd_crossover": macd_crossover,
     }
+
+
+def run_prediction(ticker: str, timeframe: str = "1w") -> dict:
+    base_price = get_current_price(ticker)
+
+    try:
+        tech = get_technical_indicators(ticker)
+    except Exception:
+        tech = None
+
+    bullish_score = 0
+    bearish_score = 0
+    key_factors: list[str] = []
+
+    if tech:
+        last_sma50 = next((v for v in reversed(tech["sma50"]) if _valid(v)), None)
+        last_sma200 = next((v for v in reversed(tech["sma200"]) if _valid(v)), None)
+        last_macd = next((v for v in reversed(tech["macd_line"]) if _valid(v)), None)
+        last_signal = next((v for v in reversed(tech["signal_line"]) if _valid(v)), None)
+
+        # Golden / Death Cross
+        if tech["cross_signal"] == "golden":
+            bullish_score += 2
+            key_factors.append("Golden Cross: SMA50 crossed above SMA200")
+        elif tech["cross_signal"] == "death":
+            bearish_score += 2
+            key_factors.append("Death Cross: SMA50 crossed below SMA200")
+
+        # MACD crossover signal
+        if tech["macd_crossover"] == "bullish":
+            bullish_score += 2
+            key_factors.append("MACD bullish crossover — momentum building")
+        elif tech["macd_crossover"] == "bearish":
+            bearish_score += 2
+            key_factors.append("MACD bearish crossover — momentum weakening")
+
+        # Current MACD vs signal line
+        if last_macd is not None and last_signal is not None:
+            if last_macd > last_signal:
+                bullish_score += 1
+                key_factors.append(f"MACD ({last_macd:.3f}) above signal ({last_signal:.3f})")
+            else:
+                bearish_score += 1
+                key_factors.append(f"MACD ({last_macd:.3f}) below signal ({last_signal:.3f})")
+
+        # Price vs SMA50 / SMA200
+        if last_sma50:
+            if base_price > last_sma50:
+                bullish_score += 1
+                key_factors.append(f"Price above SMA50 (${last_sma50:.2f})")
+            else:
+                bearish_score += 1
+                key_factors.append(f"Price below SMA50 (${last_sma50:.2f})")
+        if last_sma200:
+            if base_price > last_sma200:
+                bullish_score += 1
+                key_factors.append(f"Price above SMA200 (${last_sma200:.2f})")
+            else:
+                bearish_score += 1
+                key_factors.append(f"Price below SMA200 (${last_sma200:.2f})")
+
+    if bullish_score > bearish_score:
+        direction = "bullish"
+    elif bearish_score > bullish_score:
+        direction = "bearish"
+    else:
+        direction = "neutral"
+
+    signal_gap = abs(bullish_score - bearish_score)
+    confidence = round(min(0.95, 0.52 + signal_gap * 0.05 + random.uniform(0, 0.08)), 2)
+
+    if direction == "bullish":
+        change_pct = random.uniform(0.02, 0.15)
+    elif direction == "bearish":
+        change_pct = random.uniform(-0.15, -0.02)
+    else:
+        change_pct = random.uniform(-0.05, 0.05)
+    price_target = round(base_price * (1 + change_pct), 2)
 
     timeframe_days = {"1d": 1, "1w": 7, "1m": 30, "3m": 90, "6m": 180}
     target_date = (datetime.now() + timedelta(days=timeframe_days.get(timeframe, 7))).strftime("%Y-%m-%d")
@@ -117,13 +204,14 @@ def run_openclaw(ticker: str, timeframe: str = "1w") -> dict:
         "current_price": base_price,
         "price_target": price_target,
         "target_date": target_date,
-        "key_factors": random.sample(factors[direction], min(3, len(factors[direction]))),
+        "key_factors": key_factors[:5],
         "risk_level": random.choice(["low", "medium", "high"]),
+        "technical": tech,
     }
 
 
 def generate_chart(prediction: dict, charts_dir: str) -> str:
-    """Generate a 2x2 analysis chart and return the saved file path."""
+    """Generate a 3-row technical analysis chart and return the saved file path."""
     ticker = prediction["ticker"]
     direction = prediction["direction"]
     confidence = prediction["confidence"]
@@ -132,115 +220,165 @@ def generate_chart(prediction: dict, charts_dir: str) -> str:
     factors = prediction["key_factors"]
     risk = prediction["risk_level"]
     timeframe = prediction["timeframe"]
+    tech = prediction.get("technical") or {}
 
     color_map = {"bullish": "#26a69a", "bearish": "#ef5350", "neutral": "#ffa726"}
     risk_colors = {"low": "#26a69a", "medium": "#ffa726", "high": "#ef5350"}
     main_color = color_map[direction]
 
-    fig = plt.figure(figsize=(12, 8), facecolor="#0d1117")
+    fig = plt.figure(figsize=(14, 11), facecolor="#0d1117")
+    change_pct = (target - current) / current * 100
+    sign = "+" if change_pct >= 0 else ""
     fig.suptitle(
-        f"{ticker} — Stock Analysis ({timeframe})",
-        fontsize=16, fontweight="bold", color="white", y=0.98,
+        f"{ticker} — Technical Analysis ({timeframe})  ·  Target ${target:,.2f} ({sign}{change_pct:.1f}%)",
+        fontsize=15, fontweight="bold", color="white", y=0.99,
     )
-    gs = gridspec.GridSpec(2, 2, figure=fig, hspace=0.45, wspace=0.35)
+    gs = gridspec.GridSpec(
+        3, 2, figure=fig,
+        height_ratios=[2.5, 1.5, 1.5],
+        hspace=0.52, wspace=0.35,
+    )
 
-    # ── Panel 1: Price history sparkline + target projection + MAs ───────
-    ax1 = fig.add_subplot(gs[0, 0])
+    # ── Panel 1: Price + SMA50/200 + EMA20 + Golden/Death Cross (full width) ──
+    ax1 = fig.add_subplot(gs[0, :])
     ax1.set_facecolor("#161b22")
-    try:
-        xs, prices = get_price_history(ticker, timeframe)
-        ax1.plot(xs, prices, color=main_color, linewidth=2, label="Price")
-        ax1.fill_between(xs, prices, alpha=0.15, color=main_color)
-        last_x = xs[-1]
-        proj_x = [last_x, last_x + max(1, len(xs) // 4)]
-        proj_y = [prices[-1], target]
-        ax1.plot(proj_x, proj_y, "--", color=main_color, linewidth=1.5, alpha=0.8)
-        ax1.scatter([proj_x[-1]], [proj_y[-1]], color=main_color, s=60, zorder=5)
-        ax1.axhline(target, color=main_color, linewidth=0.8, linestyle=":", alpha=0.5)
-        ax1.text(
-            proj_x[-1] + 0.2, proj_y[-1],
-            f"  ${target:,.2f}",
-            color=main_color, fontsize=8, va="center",
-        )
 
-        # Overlay 50-day and 200-day moving averages scaled to chart x-range
-        try:
-            ma_xs, ma50, ma200 = get_moving_averages(ticker)
-            n = len(xs)
-            # Scale MA indices to the same x-range as the sparkline
-            scaled_xs = [i * (last_x / max(len(ma_xs) - 1, 1)) for i in ma_xs]
-            valid50 = [(scaled_xs[i], ma50[i]) for i in range(len(ma50)) if ma50[i] is not None and not np.isnan(ma50[i])]
-            valid200 = [(scaled_xs[i], ma200[i]) for i in range(len(ma200)) if ma200[i] is not None and not np.isnan(ma200[i])]
-            if valid50:
-                ax1.plot([p[0] for p in valid50], [p[1] for p in valid50],
-                         color="#f0b429", linewidth=1.2, alpha=0.85, label="MA50")
-            if valid200:
-                ax1.plot([p[0] for p in valid200], [p[1] for p in valid200],
-                         color="#a78bfa", linewidth=1.2, alpha=0.85, label="MA200")
-            ax1.legend(fontsize=6, loc="upper left", facecolor="#161b22",
-                       edgecolor="#30363d", labelcolor="white", framealpha=0.8)
-        except Exception:
-            pass
-    except Exception:
-        ax1.text(0.5, 0.5, "History unavailable", ha="center", va="center",
+    if tech:
+        n_all = len(tech["xs"])
+        display_n = min(126, n_all)       # last ~6 months of trading days
+        offset = n_all - display_n
+        xs = list(range(display_n))
+
+        closes = tech["closes"][-display_n:]
+        sma50  = tech["sma50"][-display_n:]
+        sma200 = tech["sma200"][-display_n:]
+        ema20  = tech["ema20"][-display_n:]
+
+        ax1.plot(xs, closes, color=main_color, linewidth=1.8, label="Price", zorder=3)
+        ax1.fill_between(xs, closes, alpha=0.10, color=main_color)
+
+        v50 = [(xs[i], sma50[i]) for i in range(len(sma50)) if _valid(sma50[i])]
+        if v50:
+            ax1.plot([p[0] for p in v50], [p[1] for p in v50],
+                     color="#f0b429", linewidth=1.4, alpha=0.9, label="SMA50")
+
+        v200 = [(xs[i], sma200[i]) for i in range(len(sma200)) if _valid(sma200[i])]
+        if v200:
+            ax1.plot([p[0] for p in v200], [p[1] for p in v200],
+                     color="#a78bfa", linewidth=1.4, alpha=0.9, label="SMA200")
+
+        ve20 = [(xs[i], ema20[i]) for i in range(len(ema20)) if _valid(ema20[i])]
+        if ve20:
+            ax1.plot([p[0] for p in ve20], [p[1] for p in ve20],
+                     color="#38bdf8", linewidth=1.1, linestyle="--", alpha=0.85, label="EMA20")
+
+        # Golden / Death Cross marker (only if within display window)
+        cross_idx = tech.get("cross_idx")
+        if cross_idx is not None:
+            disp_idx = cross_idx - offset
+            if 0 <= disp_idx < display_n:
+                cx_y = closes[disp_idx]
+                is_golden = tech["cross_signal"] == "golden"
+                cx_color = "#ffd700" if is_golden else "#ff4444"
+                cx_label = "Golden Cross ★" if is_golden else "Death Cross ✕"
+                ax1.scatter([disp_idx], [cx_y], color=cx_color, s=180, zorder=6,
+                            marker="*" if is_golden else "X", label=cx_label)
+
+        # Target projection arrow
+        last_x = xs[-1]
+        proj_len = max(4, display_n // 8)
+        proj_x = [last_x, last_x + proj_len]
+        proj_y = [closes[-1], target]
+        ax1.plot(proj_x, proj_y, "--", color=main_color, linewidth=1.5, alpha=0.8)
+        ax1.scatter([proj_x[-1]], [proj_y[-1]], color=main_color, s=70, zorder=5)
+        ax1.text(proj_x[-1] + 0.5, proj_y[-1], f"  ${target:,.2f}",
+                 color=main_color, fontsize=8, va="center")
+
+        ax1.legend(fontsize=7, loc="upper left", facecolor="#161b22",
+                   edgecolor="#30363d", labelcolor="white", framealpha=0.8, ncol=4)
+    else:
+        ax1.text(0.5, 0.5, "Technical data unavailable", ha="center", va="center",
                  color="gray", transform=ax1.transAxes)
-    ax1.set_title("Price History + MA50/200 + Target", color="white", fontsize=10, pad=6)
+
+    ax1.set_title("Price  +  SMA50 / SMA200 / EMA20  +  Target Projection",
+                  color="white", fontsize=10, pad=6)
     ax1.tick_params(colors="gray", labelsize=7)
     for spine in ax1.spines.values():
         spine.set_edgecolor("#30363d")
 
-    # ── Panel 2: Current vs Target bar ────────────────────────────────────
-    ax2 = fig.add_subplot(gs[0, 1])
+    # ── Panel 2: MACD (12, 26, 9) — full width ────────────────────────────
+    ax2 = fig.add_subplot(gs[1, :])
     ax2.set_facecolor("#161b22")
-    bars = ax2.bar(
-        ["Current", "Target"],
-        [current, target],
-        color=["#58a6ff", main_color],
-        width=0.5,
-        edgecolor="#30363d",
-    )
-    for bar, val in zip(bars, [current, target]):
-        ax2.text(
-            bar.get_x() + bar.get_width() / 2,
-            bar.get_height() + max(current, target) * 0.01,
-            f"${val:,.2f}",
-            ha="center", va="bottom", color="white", fontsize=9, fontweight="bold",
-        )
-    change_pct = (target - current) / current * 100
-    sign = "+" if change_pct >= 0 else ""
-    ax2.set_title(
-        f"Price Target  ({sign}{change_pct:.1f}%)",
-        color="white", fontsize=10, pad=6,
-    )
-    ax2.tick_params(colors="gray", labelsize=8)
-    ax2.set_ylim(0, max(current, target) * 1.15)
+
+    if tech:
+        n_all = len(tech["xs"])
+        display_n = min(126, n_all)
+        xs_m = list(range(display_n))
+        ml = tech["macd_line"][-display_n:]
+        sl = tech["signal_line"][-display_n:]
+        hl = tech["histogram"][-display_n:]
+
+        # Histogram bars (green = positive, red = negative)
+        valid_hi = [(xs_m[i], hl[i]) for i in range(len(hl)) if _valid(hl[i])]
+        if valid_hi:
+            bar_xs = [p[0] for p in valid_hi]
+            bar_ys = [p[1] for p in valid_hi]
+            bar_colors = ["#26a69a" if v >= 0 else "#ef5350" for v in bar_ys]
+            ax2.bar(bar_xs, bar_ys, color=bar_colors, alpha=0.5, width=1.0, label="Histogram")
+
+        valid_ml = [(xs_m[i], ml[i]) for i in range(len(ml)) if _valid(ml[i])]
+        if valid_ml:
+            ax2.plot([p[0] for p in valid_ml], [p[1] for p in valid_ml],
+                     color="#38bdf8", linewidth=1.5, label="MACD (12−26)")
+
+        valid_sl = [(xs_m[i], sl[i]) for i in range(len(sl)) if _valid(sl[i])]
+        if valid_sl:
+            ax2.plot([p[0] for p in valid_sl], [p[1] for p in valid_sl],
+                     color="#ffa726", linewidth=1.2, label="Signal (9)")
+
+        ax2.axhline(0, color="#30363d", linewidth=0.8)
+
+        last_m = next((v for v in reversed(ml) if _valid(v)), None)
+        last_s = next((v for v in reversed(sl) if _valid(v)), None)
+        if last_m is not None and last_s is not None:
+            trend = "▲ Bullish" if last_m > last_s else "▼ Bearish"
+            status = f"{trend}   MACD {last_m:+.3f}   Signal {last_s:+.3f}"
+        else:
+            status = ""
+        ax2.set_title(f"MACD (12, 26, 9)   {status}", color="white", fontsize=10, pad=6)
+        ax2.legend(fontsize=7, loc="upper left", facecolor="#161b22",
+                   edgecolor="#30363d", labelcolor="white", framealpha=0.8)
+    else:
+        ax2.text(0.5, 0.5, "MACD unavailable", ha="center", va="center",
+                 color="gray", transform=ax2.transAxes)
+        ax2.set_title("MACD (12, 26, 9)", color="white", fontsize=10, pad=6)
+
+    ax2.tick_params(colors="gray", labelsize=7)
     for spine in ax2.spines.values():
         spine.set_edgecolor("#30363d")
 
     # ── Panel 3: Confidence + Risk gauge ──────────────────────────────────
-    ax3 = fig.add_subplot(gs[1, 0])
+    ax3 = fig.add_subplot(gs[2, 0])
     ax3.set_facecolor("#161b22")
     ax3.set_xlim(0, 1)
     ax3.set_ylim(0, 1)
     ax3.axis("off")
 
-    # Confidence arc
     theta = np.linspace(np.pi, np.pi * (1 - confidence), 100)
-    ax3.plot(
-        0.3 + 0.22 * np.cos(theta),
-        0.55 + 0.22 * np.sin(theta),
-        color=main_color, linewidth=10, solid_capstyle="round",
-    )
     ax3.plot(
         0.3 + 0.22 * np.cos(np.linspace(np.pi, 0, 100)),
         0.55 + 0.22 * np.sin(np.linspace(np.pi, 0, 100)),
         color="#30363d", linewidth=10, solid_capstyle="round",
     )
+    ax3.plot(
+        0.3 + 0.22 * np.cos(theta),
+        0.55 + 0.22 * np.sin(theta),
+        color=main_color, linewidth=10, solid_capstyle="round",
+    )
     ax3.text(0.3, 0.50, f"{int(confidence * 100)}%", ha="center", va="center",
              color="white", fontsize=18, fontweight="bold")
     ax3.text(0.3, 0.20, "Confidence", ha="center", color="gray", fontsize=9)
 
-    # Risk pill
     risk_color = risk_colors[risk]
     pill = mpatches.FancyBboxPatch(
         (0.60, 0.42), 0.30, 0.18,
@@ -249,30 +387,31 @@ def generate_chart(prediction: dict, charts_dir: str) -> str:
     ax3.add_patch(pill)
     ax3.text(0.75, 0.51, f"Risk: {risk.upper()}", ha="center", va="center",
              color=risk_color, fontsize=10, fontweight="bold")
-
     direction_icon = {"bullish": "▲ BULLISH", "bearish": "▼ BEARISH", "neutral": "◆ NEUTRAL"}[direction]
     ax3.text(0.75, 0.28, direction_icon, ha="center", color=main_color,
              fontsize=11, fontweight="bold")
     ax3.set_title("Confidence & Risk", color="white", fontsize=10, pad=6)
 
-    # ── Panel 4: Key factors horizontal bar ───────────────────────────────
-    ax4 = fig.add_subplot(gs[1, 1])
+    # ── Panel 4: Technical signal factors ─────────────────────────────────
+    ax4 = fig.add_subplot(gs[2, 1])
     ax4.set_facecolor("#161b22")
-    y_pos = range(len(factors))
-    weights = [random.uniform(0.6, 1.0) for _ in factors]
-    ax4.barh(
-        list(y_pos), weights,
-        color=main_color, alpha=0.8, edgecolor="#30363d", height=0.5,
-    )
-    ax4.set_yticks(list(y_pos))
-    ax4.set_yticklabels(
-        [f.replace(" ", "\n") if len(f) > 20 else f for f in factors],
-        color="white", fontsize=8,
-    )
-    ax4.set_xlim(0, 1.2)
-    ax4.set_xticks([0, 0.5, 1.0])
-    ax4.set_xticklabels(["Low", "Med", "High"], color="gray", fontsize=7)
-    ax4.set_title("Key Factors (Impact)", color="white", fontsize=10, pad=6)
+    if factors:
+        y_pos = range(len(factors))
+        weights = [random.uniform(0.6, 1.0) for _ in factors]
+        ax4.barh(list(y_pos), weights, color=main_color, alpha=0.8,
+                 edgecolor="#30363d", height=0.5)
+        ax4.set_yticks(list(y_pos))
+        ax4.set_yticklabels(
+            [f[:30] + "…" if len(f) > 30 else f for f in factors],
+            color="white", fontsize=7,
+        )
+        ax4.set_xlim(0, 1.2)
+        ax4.set_xticks([0, 0.5, 1.0])
+        ax4.set_xticklabels(["Low", "Med", "High"], color="gray", fontsize=7)
+    else:
+        ax4.text(0.5, 0.5, "No signals", ha="center", va="center",
+                 color="gray", transform=ax4.transAxes)
+    ax4.set_title("Technical Signal Factors", color="white", fontsize=10, pad=6)
     ax4.tick_params(colors="gray")
     for spine in ax4.spines.values():
         spine.set_edgecolor("#30363d")
@@ -313,7 +452,7 @@ def predict_stock(ticker: str, timeframe: str = "1w", md_file=None, charts_dir: 
                 ticker_input = block.input.get("ticker", ticker)
                 tf_input = block.input.get("timeframe", timeframe)
                 print(f"Tool called: ticker={ticker_input}, timeframe={tf_input}")
-                prediction = run_openclaw(ticker_input, tf_input)
+                prediction = run_prediction(ticker_input, tf_input)
                 last_prediction = prediction
                 print(f"Prediction data: {json.dumps(prediction, indent=2)}\n")
                 tool_results.append({

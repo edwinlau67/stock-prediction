@@ -1,19 +1,20 @@
 # Stock Predictor
 
-A Python application that uses the [Anthropic SDK](https://github.com/anthropics/anthropic-sdk-python) and Claude's tool use feature to predict stock performance. Claude calls the **Stock Prediction** tool to retrieve real-time price data and generate predictions, then delivers a structured analysis with price targets, confidence scores, and key market factors — saved as a Markdown report with analysis charts.
+A Python application that uses the [Anthropic SDK](https://github.com/anthropics/anthropic-sdk-python) and Claude's tool use feature to predict stock performance. Claude calls the **Stock Prediction** tool to compute real technical indicators and generate predictions, then delivers a structured analysis with price targets, confidence scores, and trend signals — saved as a Markdown report with analysis charts.
 
 ## How It Works
 
 ```
-CLI args → Claude → Stock Prediction tool call → Live price (yfinance) + prediction data → Claude analysis → Markdown report + charts
+CLI args → Claude → Stock Prediction tool call → Live price + technical indicators (yfinance) → Claude analysis → Markdown report + charts
 ```
 
 1. You specify one or more tickers and a timeframe via CLI arguments
 2. Claude invokes the **Stock Prediction** tool with the ticker and timeframe
-3. Stock Prediction fetches the **real current price** from Yahoo Finance and generates prediction data
-4. Claude analyzes the data and writes a formatted Markdown report
-5. A 4-panel analysis chart (PNG) is generated per ticker
-6. All output is saved into a timestamped folder under `results/`
+3. Stock Prediction fetches the **real current price** and computes trend-following indicators (SMA, EMA, MACD) from Yahoo Finance
+4. Direction and confidence are derived from real technical signals (Golden/Death Cross, MACD crossovers, price vs MAs)
+5. Claude analyzes the data and writes a formatted Markdown report
+6. A 3-panel analysis chart (PNG) is generated per ticker
+7. All output is saved into a timestamped folder under `results/`
 
 ## Requirements
 
@@ -124,14 +125,30 @@ The `predictions.md` file contains a full analysis per ticker including a summar
 
 ### Analysis charts
 
-Each PNG chart contains 4 panels:
+Each PNG chart contains 3 panels:
 
 | Panel | Description |
 |-------|-------------|
-| **Price History + MA50/200 + Target** | Historical price sparkline with 50-day (amber) and 200-day (purple) moving averages and projected target line |
-| **Price Target** | Current vs target price bar chart with % change |
-| **Confidence & Risk** | Arc gauge showing confidence %, risk pill, and direction label |
-| **Key Factors (Impact)** | Horizontal bar chart of the factors driving the prediction |
+| **Price + SMA50/200/EMA20 + Target** | 6-month daily price with SMA50 (amber), SMA200 (purple), EMA20 (blue dashed), Golden/Death Cross marker, and projected target |
+| **MACD (12, 26, 9)** | Histogram (green/red bars), MACD line, and signal line with current crossover status in the title |
+| **Confidence & Risk / Signal Factors** | Arc gauge for confidence %, risk level pill, direction label, and horizontal bar chart of the technical signals that drove the prediction |
+
+## Technical Indicators
+
+The prediction engine computes these trend-following indicators on 1 year of daily closes from Yahoo Finance:
+
+| Indicator | Detail |
+|-----------|--------|
+| **SMA50** | 50-day simple moving average |
+| **SMA200** | 200-day simple moving average |
+| **EMA20** | 20-day exponential moving average |
+| **Golden Cross** | SMA50 crosses above SMA200 — bullish long-term signal (+2 pts) |
+| **Death Cross** | SMA50 crosses below SMA200 — bearish long-term signal (+2 pts) |
+| **MACD (12, 26, 9)** | MACD line (EMA12 − EMA26), signal line (EMA9 of MACD), histogram |
+| **MACD crossover** | MACD line crossing above/below signal line (+2 pts) |
+| **Price vs SMA50/200** | Whether price trades above or below each MA (+1 pt each) |
+
+Direction (`bullish` / `bearish` / `neutral`) and confidence are derived by scoring these signals — no random guessing.
 
 ## Stock Prediction Tool Reference
 
@@ -146,17 +163,17 @@ The **Stock Prediction** tool is defined as an Anthropic tool-use schema. Claude
 
 **Output fields:**
 
-| Field           | Description                                           |
-|-----------------|-------------------------------------------------------|
-| `ticker`        | Uppercased ticker symbol                              |
-| `timeframe`     | Requested prediction window                           |
-| `direction`     | `bullish`, `bearish`, or `neutral`                    |
-| `confidence`    | Confidence score between 0.55 and 0.92                |
-| `current_price` | Live price fetched from Yahoo Finance                 |
-| `price_target`  | Predicted price at the end of the timeframe           |
-| `target_date`   | ISO date when the target should be reached            |
-| `key_factors`   | Up to 3 factors driving the prediction                |
-| `risk_level`    | `low`, `medium`, or `high`                            |
+| Field           | Description                                                     |
+|-----------------|-----------------------------------------------------------------|
+| `ticker`        | Uppercased ticker symbol                                        |
+| `timeframe`     | Requested prediction window                                     |
+| `direction`     | `bullish`, `bearish`, or `neutral` — derived from indicator scores |
+| `confidence`    | Confidence score scaled by signal strength                      |
+| `current_price` | Live price fetched from Yahoo Finance                           |
+| `price_target`  | Projected price at the end of the timeframe                     |
+| `target_date`   | ISO date when the target should be reached                      |
+| `key_factors`   | Up to 5 indicator signals that drove the direction              |
+| `risk_level`    | `low`, `medium`, or `high`                                      |
 
 ## Project Structure
 
@@ -184,4 +201,4 @@ Cache read: 312 tokens
 
 ## Disclaimer
 
-Predictions are **simulated** and for demonstration purposes only. While current prices are fetched live from Yahoo Finance, the prediction direction, confidence, and key factors are algorithmically generated and do not reflect real financial analysis. This tool should not be used to make investment decisions.
+Predictions are for **demonstration purposes only**. Current prices and indicator data are fetched live from Yahoo Finance, and direction/confidence are derived from real technical signals — but technical analysis does not guarantee future performance. This tool should not be used to make investment decisions.
