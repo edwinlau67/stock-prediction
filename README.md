@@ -10,8 +10,8 @@ CLI args → Claude → Stock Prediction tool call → Live price + technical in
 
 1. You specify one or more tickers and a timeframe via CLI arguments
 2. Claude invokes the **Stock Prediction** tool with the ticker and timeframe
-3. Stock Prediction fetches the **real current price** and computes trend-following indicators (SMA, EMA, MACD) from Yahoo Finance
-4. Direction and confidence are derived from real technical signals (Golden/Death Cross, MACD crossovers, price vs MAs)
+3. Stock Prediction fetches the **real current price**, computes technical indicators (SMA, EMA, MACD, RSI, Bollinger Bands, ATR, OBV, trendlines, pivot points, Fibonacci) and fundamental metrics (P/E, growth, margins, debt) from Yahoo Finance
+4. Direction and confidence are derived by scoring all selected indicator signals
 5. Claude analyzes the data and writes a formatted Markdown report
 6. An analysis chart (PNG) is generated per ticker — only the selected indicator panels are included
 7. All output is saved into a timestamped folder under `results/`
@@ -96,13 +96,13 @@ python stock_predictor.py --tickers NVDA --indicators support
 
 ```
 usage: stock_predictor.py [-h] [--tickers TICKER [TICKER ...]]
-                          [--timeframe {1d,1w,1m,3m,6m}]
+                          [--timeframe {1d,1w,1m,3m,6m,ytd,1y,2y,5y}]
                           [--model MODEL]
                           [--indicators INDICATOR [INDICATOR ...]]
 
 options:
   --tickers     One or more stock ticker symbols (default: AAPL TSLA INTC)
-  --timeframe   Prediction timeframe for all tickers: 1d, 1w, 1m, 3m, 6m (default: 1w)
+  --timeframe   Prediction timeframe: 1d 1w 1m 3m 6m ytd 1y 2y 5y (default: 1w)
   --model       Claude model ID to use (default: claude-sonnet-4-6)
   --indicators  Indicator categories to include (default: all six)
                 Choices: trend  momentum  volatility  volume  support  fundamental
@@ -146,7 +146,16 @@ results/
 
 ### Markdown report
 
-The `predictions.md` file contains a full analysis per ticker including a summary table, key factors, and AI narrative — with each chart embedded inline. The report header records the tickers, timeframe, and model used.
+The `predictions.md` file contains a full analysis per ticker with each chart embedded inline. The report header records the tickers, timeframe, model, and active indicator categories. Each ticker section contains:
+
+| Section | Content |
+|---------|---------|
+| **📊 Prediction Summary** | Table with direction, confidence, current price, price target, target date, and risk level |
+| **🟢 Key Bullish Factors** | Numbered list of signals supporting the bullish case |
+| **🔴 Key Risk Factors / Bearish Signals** | Numbered list of opposing signals or risks to the thesis |
+| **📐 Technical Levels to Watch** | Pivot points table — R2, R1, PP, S1, S2 |
+| **📏 Fibonacci Retracement Levels** | Full Fibonacci table from 0% to 100% of the 6-month range |
+| **📝 Analysis** | 2–4 sentence narrative referencing key signals and levels |
 
 ### Analysis charts
 
@@ -173,7 +182,7 @@ Optional panels — included only when the matching `--indicators` category is s
 
 ## Technical Indicators
 
-All indicators are computed on 1 year of daily closes from Yahoo Finance. They are grouped into five categories selectable via `--indicators`.
+All indicators are computed from Yahoo Finance data. Technical indicators use 1 year of daily OHLCV history; fundamental metrics are fetched from the ticker's latest info snapshot. They are grouped into six categories selectable via `--indicators`.
 
 ### `trend`
 
@@ -248,7 +257,7 @@ The **Stock Prediction** tool is defined as an Anthropic tool-use schema. Claude
 | Parameter   | Type   | Required | Description                                       |
 |-------------|--------|----------|---------------------------------------------------|
 | `ticker`    | string | Yes      | Stock ticker symbol (e.g., `AAPL`, `TSLA`)        |
-| `timeframe` | string | No       | One of `1d`, `1w`, `1m`, `3m`, `6m` — defaults to `1w`  |
+| `timeframe` | string | No       | One of `1d`, `1w`, `1m`, `3m`, `6m`, `ytd`, `1y`, `2y`, `5y` — defaults to `1w` |
 
 **Output fields:**
 
@@ -263,6 +272,7 @@ The **Stock Prediction** tool is defined as an Anthropic tool-use schema. Claude
 | `target_date`   | ISO date when the target should be reached                      |
 | `key_factors`   | Up to 6 indicator signals that drove the direction              |
 | `risk_level`    | `low`, `medium`, or `high`                                      |
+| `fundamental`   | Fundamental metrics dict (P/E, growth, margins, debt, etc.)     |
 | `indicators`    | Sorted list of active indicator categories used for this run    |
 
 ## Project Structure
@@ -287,7 +297,7 @@ The system prompt is marked with `cache_control: {type: "ephemeral"}`. On repeat
 Cache read: 312 tokens
 ```
 
-> Note: Caching requires a minimum prefix length (~2048 tokens for Sonnet). The system prompt in this demo is intentionally short for clarity; extend it with more detailed instructions to trigger caching in production.
+> Note: Caching requires a minimum prefix length (~2048 tokens for Sonnet). The system prompt includes a detailed output format template, which is typically long enough to meet this threshold.
 
 ## Disclaimer
 
