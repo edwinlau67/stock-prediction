@@ -4,8 +4,21 @@ A Python application that uses the [Anthropic SDK](https://github.com/anthropics
 
 ## How It Works
 
-```
-CLI args → Claude → Stock Prediction tool call → Live price + technical indicators (yfinance) → Claude analysis → Markdown report + charts
+```mermaid
+sequenceDiagram
+    participant CLI as CLI
+    participant Claude as Claude API
+    participant Tool as Stock Prediction Tool
+    participant YF as Yahoo Finance
+
+    CLI->>Claude: ticker · timeframe · model · indicators
+    Claude->>Tool: tool_use call (ticker, timeframe)
+    Tool->>YF: fetch live price + 1-year OHLCV + fundamentals
+    YF-->>Tool: price data + info dict
+    Tool->>Tool: compute indicators → score signals → build prediction dict
+    Tool-->>Claude: tool_result (direction · confidence · price target · key factors)
+    Claude->>Claude: write formatted Markdown report
+    Claude-->>CLI: predictions.md + chart PNG saved to results/
 ```
 
 1. You specify one or more tickers and a timeframe via CLI arguments
