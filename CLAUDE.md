@@ -25,7 +25,7 @@ python stock_predictor.py
 python stock_predictor.py --tickers NVDA --timeframe 3m
 python stock_predictor.py --tickers AAPL MSFT --timeframe 1m --indicators trend momentum
 python stock_predictor.py --tickers TSLA --model claude-opus-4-7
-python stock_predictor.py --tickers AAPL --config my_thresholds.json
+python stock_predictor.py --tickers AAPL --config config/scoring_config.json
 python stock_predictor.py --tickers NVDA --log-level DEBUG
 
 # Run tests
@@ -37,7 +37,7 @@ python -m pytest tests/
 - `--timeframe` — `1d | 1w | 1m | 3m | 6m | ytd | 1y | 2y | 5y`
 - `--model` — Claude model ID (default: `claude-sonnet-4-6`)
 - `--indicators` — space-separated subset of: `trend momentum volatility volume support fundamental`
-- `--config` — path to a JSON file with `ScoringConfig` threshold overrides (e.g. `{"pe_bull": 20}`)
+- `--config` — path to a JSON file with `ScoringConfig` threshold overrides; default file at `config/scoring_config.json`
 - `--log-level` — `DEBUG | INFO | WARNING` (default: `INFO`)
 
 To verify a change works, run against a single ticker and check `results/*/predictions.md` and `results/*/charts/`. The test suite is in `tests/test_stock_predictor.py`.

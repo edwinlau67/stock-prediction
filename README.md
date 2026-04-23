@@ -299,6 +299,8 @@ stock-prediction/
 ├── stock_predictor.py   # Main application
 ├── requirements.txt     # Python dependencies
 ├── README.md            # This file
+├── config/
+│   └── scoring_config.json      # Default ScoringConfig thresholds
 ├── tests/
 │   └── test_stock_predictor.py  # Unit tests (pytest)
 ├── results/             # Output from each run (auto-created)
@@ -310,7 +312,19 @@ stock-prediction/
 
 ## ScoringConfig
 
-All scoring thresholds are centralised in the `ScoringConfig` dataclass and can be overridden at runtime without changing code. Pass a JSON file via `--config`:
+All scoring thresholds are centralised in the `ScoringConfig` dataclass and can be overridden at runtime without changing code. A default config file lives at `config/scoring_config.json`. Pass it (or a copy) via `--config`:
+
+```bash
+# Use the default config as-is
+python stock_predictor.py --tickers AAPL --config config/scoring_config.json
+
+# Or copy and edit it
+cp config/scoring_config.json config/aggressive.json
+# edit aggressive.json, then:
+python stock_predictor.py --tickers TSLA --config config/aggressive.json
+```
+
+Any field omitted from the JSON keeps its default value. Example override file:
 
 ```json
 {

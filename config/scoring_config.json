@@ -1,0 +1,31 @@
+{
+  "_comment": "Default ScoringConfig thresholds. Pass this file via --config to override any subset of these values.",
+
+  "pe_bull": 15.0,
+  "pe_bear": 35.0,
+  "rev_growth_bull": 0.10,
+  "earn_growth_bull": 0.15,
+  "net_margin_bull": 0.15,
+  "roe_bull": 0.15,
+  "de_bull": 0.5,
+  "de_bear": 2.0,
+  "current_ratio_bear": 1.0,
+
+  "rsi_oversold": 30.0,
+  "rsi_overbought": 70.0,
+  "stoch_oversold": 20.0,
+  "stoch_overbought": 80.0,
+  "atr_high": 1.3,
+  "atr_low": 0.8,
+
+  "conf_base": 0.52,
+  "conf_gap_factor": 0.05,
+  "conf_noise_max": 0.08,
+  "conf_cap": 0.95,
+
+  "bull_target_min": 0.02,
+  "bull_target_max": 0.15,
+  "bear_target_min": -0.15,
+  "bear_target_max": -0.02,
+  "neutral_target_range": 0.05
+}
