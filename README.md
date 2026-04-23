@@ -112,6 +112,8 @@ usage: stock_predictor.py [-h] [--tickers TICKER [TICKER ...]]
                           [--timeframe {1d,1w,1m,3m,6m,ytd,1y,2y,5y}]
                           [--model MODEL]
                           [--indicators INDICATOR [INDICATOR ...]]
+                          [--config FILE]
+                          [--log-level {DEBUG,INFO,WARNING}]
 
 options:
   --tickers     One or more stock ticker symbols (default: AAPL TSLA INTC)
@@ -119,6 +121,8 @@ options:
   --model       Claude model ID to use (default: claude-sonnet-4-6)
   --indicators  Indicator categories to include (default: all six)
                 Choices: trend  momentum  volatility  volume  support  fundamental
+  --config      JSON file with ScoringConfig threshold overrides (e.g. {"pe_bull": 20})
+  --log-level   Logging verbosity: DEBUG INFO WARNING (default: INFO)
 ```
 
 ### Supported timeframes
@@ -295,12 +299,48 @@ stock-prediction/
 ├── stock_predictor.py   # Main application
 ├── requirements.txt     # Python dependencies
 ├── README.md            # This file
+├── tests/
+│   └── test_stock_predictor.py  # Unit tests (pytest)
 ├── results/             # Output from each run (auto-created)
 │   └── YYYYMMDD_HHMMSS/
 │       ├── predictions.md
 │       └── charts/
 └── .venv/               # Virtual environment (not committed)
 ```
+
+## ScoringConfig
+
+All scoring thresholds are centralised in the `ScoringConfig` dataclass and can be overridden at runtime without changing code. Pass a JSON file via `--config`:
+
+```json
+{
+  "pe_bull": 20,
+  "rsi_oversold": 25,
+  "conf_base": 0.55
+}
+```
+
+Any field omitted from the JSON keeps its default value. The full list of overridable fields:
+
+| Field | Default | Meaning |
+|-------|---------|---------|
+| `pe_bull` / `pe_bear` | 15 / 35 | P/E thresholds for bullish/bearish signal |
+| `rev_growth_bull` | 0.10 | Revenue growth % for bullish signal |
+| `earn_growth_bull` | 0.15 | EPS growth % for bullish signal |
+| `net_margin_bull` | 0.15 | Net margin % for bullish signal |
+| `roe_bull` | 0.15 | ROE % for bullish signal |
+| `de_bull` / `de_bear` | 0.5 / 2.0 | Debt/equity thresholds |
+| `current_ratio_bear` | 1.0 | Current ratio below this = bearish |
+| `rsi_oversold` / `rsi_overbought` | 30 / 70 | RSI zone boundaries |
+| `stoch_oversold` / `stoch_overbought` | 20 / 80 | Stochastic zone boundaries |
+| `atr_high` / `atr_low` | 1.3 / 0.8 | ATR ratio thresholds for risk level |
+| `conf_base` | 0.52 | Confidence floor |
+| `conf_gap_factor` | 0.05 | Per-point confidence boost |
+| `conf_noise_max` | 0.08 | Max random noise added to confidence |
+| `conf_cap` | 0.95 | Confidence ceiling |
+| `bull_target_min/max` | 0.02 / 0.15 | Bullish price-target range (fraction) |
+| `bear_target_min/max` | -0.15 / -0.02 | Bearish price-target range (fraction) |
+| `neutral_target_range` | 0.05 | Neutral price-target range (fraction) |
 
 ## Prompt Caching
 

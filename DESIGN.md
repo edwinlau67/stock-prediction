@@ -11,6 +11,10 @@
 7. [Output Structure](#7-output-structure)
 8. [Design Patterns](#8-design-patterns)
 9. [Module Reference](#9-module-reference)
+   - [Data Layer](#data-layer)
+   - [Scoring Layer](#scoring-layer)
+   - [Chart Layer](#chart-layer)
+   - [Orchestration](#orchestration)
 
 ---
 
@@ -405,6 +409,19 @@ fig_height     = sum(height_ratios) × 2.09
 
 ---
 
+### Configuration Object Pattern — `ScoringConfig`
+
+All scoring thresholds (fundamental cutoffs, RSI/Stochastic levels, ATR ratios, confidence formula constants, price-target ranges) are centralised in a `ScoringConfig` dataclass. Each `_score_*()` helper and `run_prediction()` receive a `cfg` parameter instead of reading hard-coded constants. Callers override thresholds by passing a JSON file via `--config`; fields omitted keep their defaults.
+
+```
+ScoringConfig (dataclass, all fields have defaults)
+├── Fundamental: pe_bull, pe_bear, rev_growth_bull, earn_growth_bull, ...
+├── Technical:   rsi_oversold, rsi_overbought, stoch_*, atr_high, atr_low
+└── Confidence:  conf_base, conf_gap_factor, conf_noise_max, conf_cap
+```
+
+---
+
 ### Prompt Caching
 
 The system prompt is sent with `cache_control: {type: "ephemeral"}`. Anthropic caches the prefix for up to 5 minutes, serving repeated calls (multiple tickers in one run) at ~10% of the normal input token cost.
@@ -418,15 +435,52 @@ Subsequent tickers → cache_read_input_tokens > 0  (cache hit)
 
 ## 9. Module Reference
 
+### Data layer
+
 | Function | Signature | Purpose |
 |----------|-----------|---------|
 | `get_current_price` | `(ticker) → float` | Fetches live price via `fast_info` |
 | `get_technical_indicators` | `(ticker) → dict` | Computes all 20+ technical signals from 1-year OHLCV |
 | `get_fundamental_indicators` | `(ticker) → dict` | Fetches 15 fundamental metrics from `ticker.info` |
+| `_fetch_with_retry` | `(fn, *args, max_retries=3, **kwargs)` | Retry wrapper for flaky yfinance calls |
 | `_valid` | `(v) → bool` | Guards against NaN/None in indicator values |
-| `run_prediction` | `(ticker, timeframe, indicators) → dict` | Scores all active indicators and builds the prediction dict |
-| `generate_chart` | `(prediction, charts_dir) → str` | Builds the dynamic multi-panel PNG; returns file path |
-| `predict_stock` | `(ticker, timeframe, md_file, charts_dir, model, indicators)` | Top-level orchestrator: API loop + chart + report |
+
+### Scoring layer
+
+| Function | Signature | Purpose |
+|----------|-----------|---------|
+| `_score_trend` | `(tech, base_price, cfg) → (bull, bear, factors)` | Scores SMA/EMA/MACD/cross signals |
+| `_score_momentum` | `(tech, cfg) → (bull, bear, factors)` | Scores RSI and Stochastic signals |
+| `_score_volatility` | `(tech, cfg) → (bull, bear, factors)` | Scores Bollinger Bands and ATR |
+| `_score_volume` | `(tech, cfg) → (bull, bear, factors)` | Scores OBV trend and volume spikes |
+| `_score_support` | `(tech, base_price, cfg) → (bull, bear, factors)` | Scores trendlines and pivot points |
+| `_score_fundamental` | `(fund, cfg) → (bull, bear, factors)` | Scores all 15 fundamental metrics |
+| `run_prediction` | `(ticker, timeframe, indicators, config) → dict` | Orchestrates scoring and builds the prediction dict |
+
+### Chart layer
+
+| Function | Signature | Purpose |
+|----------|-----------|---------|
+| `_style_ax` | `(ax)` | Applies dark-theme style to an axes |
+| `_display_slice` | `(tech, n=126) → (start, dates, closes)` | Returns the last `n` bars for display |
+| `_draw_price_panel` | `(ax, tech, active, ...)` | Renders the price + overlays + target row |
+| `_draw_macd_panel` | `(ax, tech)` | Renders the MACD histogram and lines |
+| `_draw_rsi_panel` | `(ax, tech)` | Renders RSI with overbought/oversold zones |
+| `_draw_stoch_panel` | `(ax, tech)` | Renders Stochastic %K/%D |
+| `_draw_volume_panel` | `(ax, tech)` | Renders volume bars with spike markers |
+| `_draw_obv_panel` | `(ax, tech)` | Renders OBV cumulative line |
+| `_draw_support_panel` | `(ax, tech, main_color)` | Renders Fibonacci, pivot points, and trendlines |
+| `_draw_atr_panel` | `(ax, tech)` | Renders ATR with mean and volatility fill |
+| `_draw_fundamental_panel` | `(ax, fund)` | Renders 15-metric colour-coded grid |
+| `_draw_confidence_gauge` | `(ax, confidence, risk, direction, ...)` | Renders arc gauge with risk pill |
+| `_draw_signal_factors` | `(ax, factors, main_color)` | Renders horizontal bar chart of signals |
+| `generate_chart` | `(prediction, charts_dir) → str` | Assembles GridSpec, calls draw helpers; returns PNG path |
+
+### Orchestration
+
+| Function | Signature | Purpose |
+|----------|-----------|---------|
+| `predict_stock` | `(ticker, timeframe, md_file, charts_dir, model, indicators, config)` | Top-level orchestrator: API loop + chart + report |
 
 **Prediction dict schema:**
 

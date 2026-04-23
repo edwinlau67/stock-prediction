@@ -25,6 +25,11 @@ python stock_predictor.py
 python stock_predictor.py --tickers NVDA --timeframe 3m
 python stock_predictor.py --tickers AAPL MSFT --timeframe 1m --indicators trend momentum
 python stock_predictor.py --tickers TSLA --model claude-opus-4-7
+python stock_predictor.py --tickers AAPL --config my_thresholds.json
+python stock_predictor.py --tickers NVDA --log-level DEBUG
+
+# Run tests
+python -m pytest tests/
 ```
 
 **CLI arguments:**
@@ -32,8 +37,10 @@ python stock_predictor.py --tickers TSLA --model claude-opus-4-7
 - `--timeframe` — `1d | 1w | 1m | 3m | 6m | ytd | 1y | 2y | 5y`
 - `--model` — Claude model ID (default: `claude-sonnet-4-6`)
 - `--indicators` — space-separated subset of: `trend momentum volatility volume support fundamental`
+- `--config` — path to a JSON file with `ScoringConfig` threshold overrides (e.g. `{"pe_bull": 20}`)
+- `--log-level` — `DEBUG | INFO | WARNING` (default: `INFO`)
 
-There is no test suite or linter. To verify a change works, run against a single ticker and check `results/*/predictions.md` and `results/*/charts/`.
+To verify a change works, run against a single ticker and check `results/*/predictions.md` and `results/*/charts/`. The test suite is in `tests/test_stock_predictor.py`.
 
 ## Architecture
 
@@ -43,15 +50,15 @@ All code lives in `stock_predictor.py`. The flow:
 
 2. **Claude tool-use loop** — Claude calls `stock_prediction` with ticker + timeframe. The handler calls `run_prediction()`, which:
    - Fetches current price via `get_current_price()` (yfinance `fast_info`)
-   - Fetches 1-year OHLCV via `get_technical_indicators()`
+   - Fetches 1-year OHLCV via `get_technical_indicators()` (with `_fetch_with_retry` for resilience)
    - Fetches company metrics via `get_fundamental_indicators()`
-   - Computes signals for each selected indicator category (trend, momentum, volatility, volume, support, fundamental)
+   - Delegates scoring to six `_score_*()` helpers (one per category), each accepting a `ScoringConfig`
    - Accumulates `bullish_score` / `bearish_score`, derives direction, confidence, price target, and risk level
    - Returns a prediction dict to Claude
 
 3. **Claude response** — Claude formats the prediction as Markdown using the strict template defined in the system prompt (fixed section headers, emoji, tables).
 
-4. **Post-processing** — `generate_chart()` builds a multi-panel matplotlib PNG using a dynamic `GridSpec` (rows added only for selected indicator categories, dark theme). The chart path is embedded in the Markdown. Results are written to `results/YYYYMMDD_HHMMSS/`.
+4. **Post-processing** — `generate_chart()` delegates each panel to a `_draw_*()` helper and builds the dynamic `GridSpec` (rows added only for selected indicator categories, dark theme). The chart path is embedded in the Markdown. Results are written to `results/YYYYMMDD_HHMMSS/`.
 
 ### Prediction dict schema
 
@@ -72,9 +79,13 @@ All code lives in `stock_predictor.py`. The flow:
 }
 ```
 
+### ScoringConfig
+
+All scoring thresholds are centralised in the `ScoringConfig` dataclass (fundamental cutoffs, RSI/Stochastic levels, ATR ratios, confidence formula constants, price-target ranges). Load overrides at runtime with `--config thresholds.json`. Defaults match the original hard-coded values.
+
 ### Scoring model
 
-Each indicator contributes to `bullish_score` or `bearish_score`. Direction is whichever score is higher. Confidence = `min(0.95, 0.52 + gap × 0.05 + random(0, 0.08))`. Risk level is derived from ATR ratio vs. 20-day mean (>1.3× = high, <0.8× = low).
+Each indicator contributes to `bullish_score` or `bearish_score` via `_score_trend()`, `_score_momentum()`, `_score_volatility()`, `_score_volume()`, `_score_support()`, and `_score_fundamental()`. Direction is whichever score is higher. Confidence = `min(cfg.conf_cap, cfg.conf_base + gap × cfg.conf_gap_factor + random(0, cfg.conf_noise_max))`. Risk level is derived from ATR ratio vs. 20-day mean (>1.3× = high, <0.8× = low).
 
 ### Prompt caching
 
